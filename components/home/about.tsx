@@ -3,14 +3,12 @@
 import { motion } from "framer-motion";
 import { MapPin, Phone, Mail, Globe, ExternalLink } from "lucide-react";
 import { collegeInfo } from "@/lib/data";
-import { Button } from "@/components/ui/button";
 
 export function About() {
   return (
     <section id="about" className="py-16 sm:py-20 relative overflow-hidden">
-      {/* Background Glow */}
-      <div className="absolute top-1/2 left-0 w-72 h-72 bg-purple-500/5 rounded-full blur-[120px] -z-10" />
-      <div className="absolute bottom-0 right-0 w-72 h-72 bg-cyan-500/5 rounded-full blur-[120px] -z-10" />
+      {/* Background */}
+      <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
 
       <div className="container mx-auto px-4">
         {/* Header */}
@@ -23,18 +21,18 @@ export function About() {
           <h2 className="text-2xl sm:text-3xl md:text-4xl font-bold mb-3">
             About <span className="bg-gradient-to-r from-cyan-400 to-purple-400 bg-clip-text text-transparent">Us</span>
           </h2>
-          <p className="text-white/50 max-w-2xl mx-auto text-sm sm:text-base px-4 leading-relaxed">
+          <p className="text-white/40 max-w-xl mx-auto text-sm px-4 leading-relaxed">
             {collegeInfo.about}
           </p>
         </motion.div>
 
-        <div className="grid lg:grid-cols-2 gap-6 sm:gap-8 max-w-5xl mx-auto">
+        <div className="grid lg:grid-cols-2 gap-5 max-w-4xl mx-auto">
           {/* Map */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
-            className="rounded-2xl overflow-hidden bg-white/5 border border-white/10 h-[280px] sm:h-[350px] lg:h-[400px]"
+            className="rounded-xl overflow-hidden bg-white/[0.02] border border-white/[0.06] h-[250px] sm:h-[300px]"
           >
             <iframe
               src={collegeInfo.mapEmbed}
@@ -55,79 +53,76 @@ export function About() {
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
             transition={{ delay: 0.1 }}
-            className="rounded-2xl bg-white/5 border border-white/10 p-5 sm:p-6 lg:p-8 space-y-4 sm:space-y-5"
+            className="rounded-xl bg-white/[0.02] border border-white/[0.06] p-5 sm:p-6 space-y-4"
           >
-            <h3 className="text-xl sm:text-2xl font-bold bg-gradient-to-r from-cyan-400 to-purple-400 bg-clip-text text-transparent">
+            <h3 className="text-lg font-semibold bg-gradient-to-r from-cyan-400 to-purple-400 bg-clip-text text-transparent">
               Get in Touch
             </h3>
 
-            <div className="space-y-3 sm:space-y-4">
+            <div className="space-y-3">
               {/* Address */}
-              <div className="flex items-start gap-3 sm:gap-4">
-                <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-cyan-500/10 flex items-center justify-center flex-shrink-0">
-                  <MapPin className="w-4 h-4 sm:w-5 sm:h-5 text-cyan-400" />
+              <div className="flex items-start gap-3">
+                <div className="w-8 h-8 rounded-lg bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center flex-shrink-0">
+                  <MapPin className="w-3.5 h-3.5 text-cyan-400" />
                 </div>
                 <div>
-                  <p className="font-medium text-white text-sm sm:text-base">Address</p>
-                  <p className="text-white/50 text-xs sm:text-sm">
+                  <p className="font-medium text-white text-xs">Address</p>
+                  <p className="text-white/40 text-[11px] leading-relaxed">
                     {collegeInfo.address}
                   </p>
                 </div>
               </div>
 
               {/* Phone */}
-              <div className="flex items-start gap-3 sm:gap-4">
-                <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-blue-500/10 flex items-center justify-center flex-shrink-0">
-                  <Phone className="w-4 h-4 sm:w-5 sm:h-5 text-blue-400" />
+              <div className="flex items-start gap-3">
+                <div className="w-8 h-8 rounded-lg bg-blue-500/10 border border-blue-500/20 flex items-center justify-center flex-shrink-0">
+                  <Phone className="w-3.5 h-3.5 text-blue-400" />
                 </div>
                 <div>
-                  <p className="font-medium text-white text-sm sm:text-base">Phone</p>
-                  <p className="text-white/50 text-xs sm:text-sm">
+                  <p className="font-medium text-white text-xs">Phone</p>
+                  <p className="text-white/40 text-[11px]">
                     {collegeInfo.phone}
                   </p>
                 </div>
               </div>
 
               {/* Email */}
-              <div className="flex items-start gap-3 sm:gap-4">
-                <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-purple-500/10 flex items-center justify-center flex-shrink-0">
-                  <Mail className="w-4 h-4 sm:w-5 sm:h-5 text-purple-400" />
+              <div className="flex items-start gap-3">
+                <div className="w-8 h-8 rounded-lg bg-purple-500/10 border border-purple-500/20 flex items-center justify-center flex-shrink-0">
+                  <Mail className="w-3.5 h-3.5 text-purple-400" />
                 </div>
                 <div>
-                  <p className="font-medium text-white text-sm sm:text-base">Email</p>
-                  <p className="text-white/50 text-xs sm:text-sm">
+                  <p className="font-medium text-white text-xs">Email</p>
+                  <p className="text-white/40 text-[11px]">
                     {collegeInfo.email}
                   </p>
                 </div>
               </div>
 
               {/* Website */}
-              <div className="flex items-start gap-3 sm:gap-4">
-                <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-cyan-500/10 flex items-center justify-center flex-shrink-0">
-                  <Globe className="w-4 h-4 sm:w-5 sm:h-5 text-cyan-400" />
+              <div className="flex items-start gap-3">
+                <div className="w-8 h-8 rounded-lg bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center flex-shrink-0">
+                  <Globe className="w-3.5 h-3.5 text-cyan-400" />
                 </div>
                 <div>
-                  <p className="font-medium text-white text-sm sm:text-base">Website</p>
-                  <p className="text-white/50 text-xs sm:text-sm">
+                  <p className="font-medium text-white text-xs">Website</p>
+                  <p className="text-white/40 text-[11px]">
                     {collegeInfo.website}
                   </p>
                 </div>
               </div>
             </div>
 
-            <Button
-              asChild
-              className="w-full bg-gradient-to-r from-cyan-500 via-blue-500 to-purple-500 hover:from-cyan-400 hover:via-blue-400 hover:to-purple-400 text-white border-0 rounded-xl py-5 sm:py-6 font-semibold shadow-lg shadow-cyan-500/20"
+            {/* Minimalistic Button */}
+            <a
+              href={`https://${collegeInfo.website}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="group flex items-center justify-center gap-2 w-full py-3 mt-4 text-xs font-medium text-white/70 border border-white/10 rounded-lg bg-white/[0.02] hover:bg-white/[0.05] hover:border-white/20 hover:text-white transition-all duration-300"
             >
-              <a
-                href={`https://${collegeInfo.website}`}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                Visit College Website
-                <ExternalLink className="ml-2 w-4 h-4" />
-              </a>
-            </Button>
+              Visit College Website
+              <ExternalLink className="w-3 h-3 group-hover:translate-x-0.5 transition-transform" />
+            </a>
           </motion.div>
         </div>
       </div>
