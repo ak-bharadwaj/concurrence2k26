@@ -30,7 +30,7 @@ export function About() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-12 max-w-4xl mx-auto">
           {[
             { icon: Calendar, label: "Date", value: "Feb 27-28, 2026" },
-            { icon: Users, label: "Team Size", value: "2-4 Members" },
+            { icon: Users, label: "Team Size", value: "3-5 Members" },
             { icon: MapPin, label: "Mode", value: "Offline" },
             { icon: Globe, label: "Level", value: "National" },
           ].map((item, index) => (

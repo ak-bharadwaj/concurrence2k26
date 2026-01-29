@@ -46,7 +46,7 @@ export function PrizesSection() {
                 </motion.div>
 
                 {/* Prizes Grid */}
-                <div className="grid md:grid-cols-3 gap-6 max-w-5xl mx-auto">
+                <div className="grid gap-4 sm:gap-6 max-w-5xl mx-auto md:grid-cols-3">
                     {prizes.map((prize, index) => {
                         const Icon = iconMap[prize.icon as keyof typeof iconMap] || Trophy;
                         const isHighlight = prize.highlight;
@@ -60,7 +60,7 @@ export function PrizesSection() {
                                 transition={{ delay: index * 0.15 }}
                                 className={cn(
                                     "relative group",
-                                    isHighlight && "md:-mt-8 md:mb-8"
+                                    isHighlight && "md:-mt-8 md:mb-8 order-first md:order-none"
                                 )}
                             >
                                 <div className={cn(

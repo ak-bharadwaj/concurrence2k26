@@ -47,7 +47,7 @@ export function PhasesSection() {
                 </motion.div>
 
                 {/* Phases Cards */}
-                <div className="grid md:grid-cols-2 gap-6 sm:gap-8 max-w-5xl mx-auto relative">
+                <div className="flex flex-col md:grid md:grid-cols-2 gap-4 sm:gap-6 md:gap-8 max-w-5xl mx-auto relative">
                     {/* Connecting Arrow (desktop) */}
                     <div className="hidden md:flex absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10">
                         <motion.div
@@ -75,7 +75,7 @@ export function PhasesSection() {
                                 className="group"
                             >
                                 <div className={cn(
-                                    "relative overflow-hidden rounded-3xl border transition-all duration-500",
+                                    "relative overflow-hidden rounded-2xl sm:rounded-3xl border transition-all duration-500",
                                     style.border,
                                     style.bg,
                                     "hover:shadow-2xl",
@@ -88,40 +88,40 @@ export function PhasesSection() {
                                         "opacity-[0.03]"
                                     )} />
 
-                                    <div className="relative p-6 sm:p-8 space-y-6">
+                                    <div className="relative p-5 sm:p-6 md:p-8 space-y-4 sm:space-y-6">
                                         {/* Icon & Title */}
-                                        <div className="flex items-start gap-4">
+                                        <div className="flex items-start gap-3 sm:gap-4">
                                             <motion.div
                                                 whileHover={{ rotate: 10, scale: 1.1 }}
                                                 className={cn(
-                                                    "w-16 h-16 rounded-2xl flex items-center justify-center border border-white/10",
+                                                    "w-12 h-12 sm:w-16 sm:h-16 rounded-xl sm:rounded-2xl flex items-center justify-center border border-white/10",
                                                     style.iconBg
                                                 )}
                                             >
-                                                <Icon className={cn("w-8 h-8", style.text)} />
+                                                <Icon className={cn("w-6 h-6 sm:w-8 sm:h-8", style.text)} />
                                             </motion.div>
-                                            <div>
+                                            <div className="flex-1 min-w-0">
                                                 <h3 className={cn(
-                                                    "text-2xl sm:text-3xl font-bold",
+                                                    "text-xl sm:text-2xl md:text-3xl font-bold",
                                                     style.text
                                                 )}>
                                                     {phase.name}
                                                 </h3>
-                                                <p className="text-white/50 text-sm mt-1">
+                                                <p className="text-white/50 text-xs sm:text-sm mt-1 line-clamp-1">
                                                     {phase.tagline}
                                                 </p>
                                             </div>
                                         </div>
 
                                         {/* Description */}
-                                        <p className="text-white/60 text-sm sm:text-base leading-relaxed">
+                                        <p className="text-white/60 text-sm leading-relaxed line-clamp-3 sm:line-clamp-none">
                                             {phase.description}
                                         </p>
 
                                         {/* Duration Badge */}
-                                        <div className="flex items-center gap-4 flex-wrap">
+                                        <div className="flex items-center gap-2 sm:gap-4 flex-wrap">
                                             <span className={cn(
-                                                "inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-medium",
+                                                "inline-flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-full border text-[10px] sm:text-xs font-medium",
                                                 style.border,
                                                 style.bg,
                                                 style.text
@@ -129,14 +129,14 @@ export function PhasesSection() {
                                                 <Clock className="w-3 h-3" />
                                                 {phase.duration}
                                             </span>
-                                            <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-white/10 bg-white/[0.02] text-xs text-white/50">
+                                            <span className="inline-flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-full border border-white/10 bg-white/[0.02] text-[10px] sm:text-xs text-white/50">
                                                 <Users className="w-3 h-3" />
-                                                2-4 Members
+                                                3-5 Members
                                             </span>
                                         </div>
 
-                                        {/* Details */}
-                                        <div className="space-y-2">
+                                        {/* Details - Hidden on mobile for cleaner look */}
+                                        <div className="hidden sm:block space-y-2">
                                             {phase.details.map((detail, i) => (
                                                 <div key={i} className="flex items-center gap-2 text-sm text-white/50">
                                                     <CheckCircle className={cn("w-4 h-4 flex-shrink-0", style.text)} />
@@ -147,34 +147,31 @@ export function PhasesSection() {
 
                                         {/* Outcome */}
                                         <div className={cn(
-                                            "p-4 rounded-xl border",
+                                            "p-3 sm:p-4 rounded-lg sm:rounded-xl border",
                                             style.border,
                                             "bg-gradient-to-r",
                                             style.gradient,
                                             "bg-opacity-5"
                                         )}>
-                                            <p className={cn("text-sm font-semibold", style.text)}>
+                                            <p className={cn("text-xs sm:text-sm font-semibold", style.text)}>
                                                 ✨ {phase.outcome}
                                             </p>
                                         </div>
                                     </div>
                                 </div>
+
+                                {/* Mobile Arrow - Between cards */}
+                                {index === 0 && (
+                                    <div className="flex md:hidden justify-center py-3">
+                                        <div className="w-8 h-8 rounded-full bg-white/5 border border-white/10 flex items-center justify-center rotate-90">
+                                            <ArrowRight className="w-4 h-4 text-white/40" />
+                                        </div>
+                                    </div>
+                                )}
                             </motion.div>
                         );
                     })}
                 </div>
-
-                {/* Mobile Arrow */}
-                <motion.div
-                    initial={{ opacity: 0 }}
-                    whileInView={{ opacity: 1 }}
-                    viewport={{ once: true }}
-                    className="flex md:hidden justify-center py-4"
-                >
-                    <div className="w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center rotate-90">
-                        <ArrowRight className="w-5 h-5 text-white/40" />
-                    </div>
-                </motion.div>
             </div>
         </section>
     );

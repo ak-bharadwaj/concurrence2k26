@@ -72,7 +72,7 @@ export const phases: Phase[] = [
       "Present your innovative idea",
       "5-minute pitch + 3-minute Q&A",
       "Focus on problem-solving approach",
-      "Team size: 2-4 members",
+      "Team size: 3-5 members",
     ],
     outcome: "Top teams qualify for CodeJam",
   },
@@ -97,33 +97,33 @@ export const phases: Phase[] = [
 export const judges: Judge[] = [
   {
     id: "judge-1",
-    name: "Rajesh Kumar Sharma",
-    title: "Chief Technology Officer",
-    company: "TechVentures India",
-    image: "https://images.unsplash.com/photo-1560250097-0b93528c311a?w=400&h=400&fit=crop&crop=face",
-    quote: "Innovation is not about technology, it's about solving real problems.",
-    expertise: ["Cloud Architecture", "AI/ML", "Startup Scaling"],
-    linkedin: "https://linkedin.com/in/",
+    name: "Om Ashish Mishra",
+    title: "Product Data Scientist",
+    company: "Deloitte",
+    image: "/judges/om-ashish-mishra.png",
+    quote: "Innovation is about solving real problems with data-driven solutions.",
+    expertise: ["GenAI & Data Innovation", "ML & Data Engineering", "Snowflake & Databricks"],
+    linkedin: "https://www.linkedin.com/in/om-ashish-mishra/",
   },
   {
     id: "judge-2",
-    name: "Dr. Priya Venkatesh",
-    title: "Senior Engineering Director",
-    company: "Google India",
-    image: "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=400&h=400&fit=crop&crop=face",
-    quote: "The best code is the one that makes complex things simple.",
-    expertise: ["System Design", "Open Source", "Developer Experience"],
-    linkedin: "https://linkedin.com/in/",
+    name: "M.D. Moinuddin",
+    title: "SDE (Mobile) & TensorFlow UG Lead",
+    company: "Tradelab Technologies",
+    image: "/judges/md-moinuddin.png",
+    quote: "Build cross-platform, production-ready apps that make a difference.",
+    expertise: ["Flutter & Mobile Dev", "AI/ML & TensorFlow", "Fintech & Web3"],
+    linkedin: "https://www.linkedin.com/in/moinuddin9777/",
   },
   {
     id: "judge-3",
-    name: "Arun Krishnamurthy",
-    title: "Founder & CEO",
-    company: "InnovateTech Labs",
+    name: "TBA",
+    title: "Industry Expert",
+    company: "To Be Announced",
     image: "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=400&h=400&fit=crop&crop=face",
-    quote: "Every great product started as a crazy idea in someone's mind.",
-    expertise: ["Product Strategy", "Venture Capital", "Tech Entrepreneurship"],
-    linkedin: "https://linkedin.com/in/",
+    quote: "More details coming soon!",
+    expertise: ["Technology", "Innovation", "Leadership"],
+    linkedin: "https://linkedin.com/",
   },
 ];
 
@@ -131,22 +131,24 @@ export const judges: Judge[] = [
 export const prizes: Prize[] = [
   {
     position: "winner",
-    title: "Internship",
-    description: "Paid internship opportunity at a leading tech company. Kickstart your career with real-world experience.",
-    icon: "briefcase",
+    title: "₹30,000 + Internship",
+    description: "Grand prize of ₹30,000 cash plus a paid internship opportunity at a leading tech company. Kickstart your career!",
+    icon: "trophy",
     highlight: true,
   },
   {
     position: "runner-up",
-    title: "₹15,000 Cash Prize",
-    description: "Cash prize plus certificates and exclusive swag.",
-    icon: "trophy",
+    title: "₹25,000 + Internship",
+    description: "₹25,000 cash prize plus internship opportunity. Prove your skills and launch your career!",
+    icon: "medal",
+    highlight: true,
   },
   {
     position: "third",
-    title: "₹10,000 Cash Prize",
-    description: "Cash prize plus certificates and exclusive swag.",
-    icon: "medal",
+    title: "₹20,000 + Internship",
+    description: "₹20,000 cash prize plus internship opportunity. All top 3 teams win internships!",
+    icon: "award",
+    highlight: true,
   },
 ];
 
@@ -217,4 +219,21 @@ export const socialLinks = [
   { platform: "twitter", url: "https://twitter.com/rgmcet" },
   { platform: "linkedin", url: "https://linkedin.com/school/rgmcet" },
   { platform: "youtube", url: "https://youtube.com/@rgmcet" },
+];
+
+// Events for registration (single hackathon event)
+export interface Event {
+  id: string;
+  slug: string;
+  name: string;
+  registrationFee: number;
+}
+
+export const events: Event[] = [
+  {
+    id: "techsprint",
+    slug: "techsprint",
+    name: "TechSprint 2K26",
+    registrationFee: techSprintInfo.registrationFee,
+  },
 ];

@@ -124,10 +124,27 @@ export function Hero() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.7 }}
+            className="flex items-center justify-center gap-3"
           >
-            <span className="inline-block px-4 py-1.5 text-xs sm:text-sm font-medium text-white/60 border border-white/10 rounded-full bg-white/[0.02]">
-              {techSprintInfo.dates.start} — {techSprintInfo.dates.end}
-            </span>
+            <div className="flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-gradient-to-r from-cyan-500/10 via-purple-500/10 to-pink-500/10 border border-white/10 backdrop-blur-sm">
+              <div className="flex flex-col items-center px-3 py-1 rounded-lg bg-cyan-500/20 border border-cyan-500/30">
+                <span className="text-[10px] text-cyan-400 uppercase tracking-wider font-medium">Feb</span>
+                <span className="text-xl font-bold text-white" style={{ fontFamily: "var(--font-orbitron), sans-serif" }}>27</span>
+              </div>
+              <div className="flex flex-col items-center">
+                <span className="text-white/30 text-xs">to</span>
+                <motion.div
+                  animate={{ x: [0, 4, 0] }}
+                  transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut" }}
+                  className="text-purple-400"
+                >→</motion.div>
+              </div>
+              <div className="flex flex-col items-center px-3 py-1 rounded-lg bg-purple-500/20 border border-purple-500/30">
+                <span className="text-[10px] text-purple-400 uppercase tracking-wider font-medium">Feb</span>
+                <span className="text-xl font-bold text-white" style={{ fontFamily: "var(--font-orbitron), sans-serif" }}>28</span>
+              </div>
+            </div>
+            <span className="text-white/30 text-sm hidden sm:inline">2026</span>
           </motion.div>
 
           {/* CTA Button */}
@@ -137,18 +154,23 @@ export function Hero() {
             transition={{ delay: 0.8 }}
             className="pt-4 flex justify-center"
           >
-            <Link href="#phases">
-              <Button
-                borderRadius="2rem"
-                containerClassName="h-14 w-auto px-0"
-                className="bg-background/80 border-white/10 px-8 gap-2 text-base font-semibold"
-                borderClassName="bg-[radial-gradient(#22d3ee_40%,transparent_60%)]"
-                duration={3000}
-              >
-                Start Your Journey
-                <ArrowRight className="w-5 h-5" />
-              </Button>
-            </Link>
+            <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
+              <Link href="/register">
+                <Button
+                  borderRadius="2rem"
+                  containerClassName="h-14 w-auto px-0"
+                  className="bg-gradient-to-r from-cyan-500/20 to-purple-500/20 border-cyan-500/30 px-8 gap-2 text-base font-semibold"
+                  borderClassName="bg-[radial-gradient(#22d3ee_40%,transparent_60%)]"
+                  duration={3000}
+                >
+                  Register Now
+                  <ArrowRight className="w-5 h-5" />
+                </Button>
+              </Link>
+              <Link href="#phases" className="text-white/50 hover:text-white text-sm transition-colors">
+                Learn More →
+              </Link>
+            </div>
           </motion.div>
 
           {/* College Name */}
