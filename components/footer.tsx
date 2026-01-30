@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useRef } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { Instagram, Twitter, Linkedin, Youtube, Mail, Phone, MapPin, ChevronLeft, ChevronRight } from "lucide-react";
+import { Instagram, Twitter, Linkedin, Youtube, Mail, Phone, MapPin } from "lucide-react";
 import { collegeInfo, techSprintInfo, socialLinks } from "@/lib/data";
 
 const quickLinks = [
@@ -23,16 +23,6 @@ const socialIcons = {
 
 export function Footer() {
   const scrollRef = useRef<HTMLDivElement>(null);
-
-  const scroll = (direction: 'left' | 'right') => {
-    if (scrollRef.current) {
-      const scrollAmount = 280; // approx card width + gap
-      scrollRef.current.scrollBy({
-        left: direction === 'left' ? -scrollAmount : scrollAmount,
-        behavior: 'smooth'
-      });
-    }
-  };
 
   return (
     <footer className="border-t border-white/10 bg-black/50 backdrop-blur-xl">
@@ -128,42 +118,17 @@ export function Footer() {
 
         {/* Developer Credits */}
         <div className="mt-8 pt-6 border-t border-white/[0.06]">
-          {/* Header with Navigation */}
-          <div className="flex items-center justify-between mb-4">
-            {/* Left Nav Button */}
-            <button
-              onClick={() => scroll('left')}
-              className="w-9 h-9 rounded-full bg-white/[0.03] border border-white/[0.1] flex items-center justify-center text-white/40 hover:text-cyan-400 hover:border-cyan-500/50 hover:bg-cyan-500/10 transition-all duration-300 group"
-              aria-label="Previous developer"
-            >
-              <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
-            </button>
-
-            {/* Title */}
-            <p className="text-[10px] text-white/40 uppercase tracking-widest">
-              Developed by
-            </p>
-
-            {/* Right Nav Button */}
-            <button
-              onClick={() => scroll('right')}
-              className="w-9 h-9 rounded-full bg-white/[0.03] border border-white/[0.1] flex items-center justify-center text-white/40 hover:text-cyan-400 hover:border-cyan-500/50 hover:bg-cyan-500/10 transition-all duration-300 group"
-              aria-label="Next developer"
-            >
-              <ChevronRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
-            </button>
-          </div>
+          {/* Title */}
+          <p className="text-center text-[10px] text-white/40 uppercase tracking-widest mb-4">
+            Developed by
+          </p>
 
           {/* Scrollable Container */}
-          <div className="relative overflow-hidden group/scroll">
-            {/* Gradient masks - using black for consistent fade */}
-            <div className="absolute left-0 top-0 bottom-0 w-12 bg-gradient-to-r from-black via-black/80 to-transparent z-10 pointer-events-none" />
-            <div className="absolute right-0 top-0 bottom-0 w-12 bg-gradient-to-l from-black via-black/80 to-transparent z-10 pointer-events-none" />
-
-            {/* Scrollable track with auto-scroll + manual */}
+          <div className="relative overflow-hidden">
+            {/* Scrollable track with auto-scroll */}
             <div
               ref={scrollRef}
-              className="flex gap-4 py-3 overflow-x-auto scrollbar-hide scroll-smooth animate-scroll-slow group-hover/scroll:[animation-play-state:paused]"
+              className="flex gap-4 py-3 animate-scroll-slow"
               style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
             >
               {/* Duplicate devs for infinite scroll effect */}

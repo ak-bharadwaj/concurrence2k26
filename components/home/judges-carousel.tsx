@@ -1,25 +1,14 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef } from "react";
 import { motion } from "framer-motion";
 import Image from "next/image";
-import { Linkedin, Quote, ChevronLeft, ChevronRight } from "lucide-react";
+import { Linkedin, Quote } from "lucide-react";
 import { judges } from "@/lib/data";
 
 export function JudgesCarousel() {
-    const [isPaused, setIsPaused] = useState(false);
     const containerRef = useRef<HTMLDivElement>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
-
-    const scroll = (direction: 'left' | 'right') => {
-        if (scrollRef.current) {
-            const scrollAmount = 340; // approx card width + gap
-            scrollRef.current.scrollBy({
-                left: direction === 'left' ? -scrollAmount : scrollAmount,
-                behavior: 'smooth'
-            });
-        }
-    };
 
     return (
         <section id="judges" className="py-20 sm:py-28 relative overflow-hidden">
@@ -38,48 +27,21 @@ export function JudgesCarousel() {
                     <h2 className="text-3xl sm:text-4xl md:text-5xl font-bold mb-4">
                         Meet The <span className="bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">Judges</span>
                     </h2>
-                    <p className="text-white/40 max-w-lg mx-auto text-sm sm:text-base mb-6">
+                    <p className="text-white/40 max-w-lg mx-auto text-sm sm:text-base">
                         Industry experts who will evaluate your innovations and code
                     </p>
-
-                    {/* Navigation Buttons */}
-                    <div className="flex items-center justify-center gap-4">
-                        <button
-                            onClick={() => scroll('left')}
-                            className="w-10 h-10 rounded-full bg-white/[0.03] border border-white/[0.1] flex items-center justify-center text-white/40 hover:text-purple-400 hover:border-purple-500/50 hover:bg-purple-500/10 transition-all duration-300 group"
-                            aria-label="Previous judge"
-                        >
-                            <ChevronLeft className="w-5 h-5 group-hover:-translate-x-0.5 transition-transform" />
-                        </button>
-                        <button
-                            onClick={() => scroll('right')}
-                            className="w-10 h-10 rounded-full bg-white/[0.03] border border-white/[0.1] flex items-center justify-center text-white/40 hover:text-purple-400 hover:border-purple-500/50 hover:bg-purple-500/10 transition-all duration-300 group"
-                            aria-label="Next judge"
-                        >
-                            <ChevronRight className="w-5 h-5 group-hover:translate-x-0.5 transition-transform" />
-                        </button>
-                    </div>
                 </motion.div>
 
                 {/* Carousel Container */}
                 <div
                     ref={containerRef}
-                    className="relative overflow-hidden group/scroll"
-                    onMouseEnter={() => setIsPaused(true)}
-                    onMouseLeave={() => setIsPaused(false)}
-                    onTouchStart={() => setIsPaused(true)}
-                    onTouchEnd={() => setIsPaused(false)}
+                    className="relative overflow-hidden"
                 >
-                    {/* Gradient Masks - using black for consistent fade */}
-                    <div className="absolute left-0 top-0 bottom-0 w-12 sm:w-24 bg-gradient-to-r from-black via-black/80 to-transparent z-10 pointer-events-none" />
-                    <div className="absolute right-0 top-0 bottom-0 w-12 sm:w-24 bg-gradient-to-l from-black via-black/80 to-transparent z-10 pointer-events-none" />
-
-                    {/* Scrolling Track - animation pauses on hover */}
+                    {/* Scrolling Track - smooth auto-scroll */}
                     <div
                         ref={scrollRef}
-                        className="flex gap-4 sm:gap-6 py-4 animate-scroll overflow-x-auto scrollbar-hide group-hover/scroll:[animation-play-state:paused]"
+                        className="flex gap-4 sm:gap-6 py-4 animate-scroll"
                         style={{
-                            animationPlayState: isPaused ? 'paused' : 'running',
                             scrollbarWidth: 'none',
                             msOverflowStyle: 'none'
                         }}
@@ -90,15 +52,6 @@ export function JudgesCarousel() {
                         ))}
                     </div>
                 </div>
-
-                {/* Pause indicator */}
-                {isPaused && (
-                    <div className="flex justify-center mt-4">
-                        <span className="text-xs text-white/40 bg-white/5 px-3 py-1 rounded-full">
-                            Paused - scroll to view
-                        </span>
-                    </div>
-                )}
             </div>
         </section>
     );
