@@ -56,7 +56,7 @@ export const collegeInfo = {
   website: "rgmcet.edu.in",
   established: 1995,
   about: "RGM College of Engineering & Technology is a premier autonomous institution committed to excellence in technical education. The Department of Computer Science & Engineering is proud to present TechSprint - a platform for young innovators to showcase their talent.",
-  mapEmbed: "https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3859.123456789!2d78.4835!3d15.5087!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x0%3A0x0!2zMTXCsDMwJzMxLjMiTiA3OMKwMjknMDAuNiJF!5e0!3m2!1sen!2sin!4v1234567890",
+  mapEmbed: "https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3859.4!2d78.4671!3d15.4973!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x3bb5a10a8e5fb7e9%3A0x6a8e6b4f9c8d7e2a!2sRGM%20College%20of%20Engineering%20%26%20Technology!5e0!3m2!1sen!2sin!4v1706000000000!5m2!1sen!2sin",
 };
 
 // Two Phases of TechSprint

@@ -6,6 +6,7 @@ import { ArrowRight, Clock, Zap } from "lucide-react";
 import { techSprintInfo, collegeInfo } from "@/lib/data";
 import { CountdownTimer } from "./countdown-timer";
 import FloatingLines from "@/components/FloatingLines";
+import { FloatingLinesErrorBoundary } from "@/components/FloatingLinesErrorBoundary";
 import { Button } from "@/components/ui/moving-border";
 
 export function Hero() {
@@ -13,19 +14,21 @@ export function Hero() {
     <section className="relative min-h-screen flex items-center justify-center overflow-hidden">
       {/* FloatingLines Background */}
       <div className="absolute inset-0 -z-10">
-        <FloatingLines
-          linesGradient={["#06b6d4", "#3b82f6", "#8b5cf6", "#ec4899"]}
-          enabledWaves={["top", "middle", "bottom"]}
-          lineCount={[4, 6, 4]}
-          lineDistance={[8, 6, 10]}
-          animationSpeed={0.8}
-          interactive={true}
-          bendRadius={6}
-          bendStrength={-0.4}
-          parallax={true}
-          parallaxStrength={0.15}
-          mixBlendMode="screen"
-        />
+        <FloatingLinesErrorBoundary>
+          <FloatingLines
+            linesGradient={["#06b6d4", "#3b82f6", "#8b5cf6", "#ec4899"]}
+            enabledWaves={["top", "middle", "bottom"]}
+            lineCount={[4, 6, 4]}
+            lineDistance={[8, 6, 10]}
+            animationSpeed={0.8}
+            interactive={true}
+            bendRadius={6}
+            bendStrength={-0.4}
+            parallax={true}
+            parallaxStrength={0.15}
+            mixBlendMode="screen"
+          />
+        </FloatingLinesErrorBoundary>
         <div className="absolute inset-0 bg-gradient-to-b from-background/30 via-background/60 to-background" />
       </div>
 
@@ -36,15 +39,25 @@ export function Hero() {
           transition={{ duration: 0.8 }}
           className="space-y-6"
         >
-          {/* College Badge */}
+          {/* College Header - Prominent at Top */}
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
-            className="flex flex-col items-center gap-1"
+            className="flex flex-col items-center gap-2"
           >
-            <p className="text-[10px] sm:text-xs text-white/40 uppercase tracking-widest">
-              {collegeInfo.department} presents
+            {/* College Name - Prominent */}
+            <div className="relative">
+              <div className="absolute inset-0 bg-gradient-to-r from-cyan-500/20 via-purple-500/20 to-cyan-500/20 blur-xl" />
+              <h2 className="relative text-sm sm:text-base md:text-lg font-bold tracking-wide text-center px-4">
+                <span className="bg-gradient-to-r from-cyan-400 via-white to-purple-400 bg-clip-text text-transparent">
+                  {collegeInfo.name}
+                </span>
+              </h2>
+            </div>
+            {/* Department */}
+            <p className="text-[10px] sm:text-xs text-white/50 uppercase tracking-[0.2em]">
+              {collegeInfo.department} • presents
             </p>
           </motion.div>
 
@@ -173,17 +186,11 @@ export function Hero() {
             </div>
           </motion.div>
 
-          {/* College Name */}
-          <motion.p
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 1 }}
-            className="text-xs text-white/30 pt-4"
-          >
-            {collegeInfo.name}
-          </motion.p>
         </motion.div>
       </div>
+
+      {/* Spacer to separate from college badge */}
+      <div className="h-8" />
 
       {/* Scroll Indicator */}
       <motion.div
