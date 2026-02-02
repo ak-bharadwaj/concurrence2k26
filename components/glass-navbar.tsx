@@ -11,7 +11,6 @@ const navLinks = [
     { href: "/#phases", label: "Phases" },
     { href: "/#judges", label: "Judges" },
     { href: "/#prizes", label: "Prizes" },
-    { href: "/admin/login", label: "Admin" },
 ];
 
 export function GlassNavbar() {
@@ -58,17 +57,31 @@ export function GlassNavbar() {
                             </Link>
                         ))}
 
-                        {/* Register Button */}
-                        <Link
-                            href="/register"
-                            className="ml-3 px-4 py-1.5 text-xs font-semibold text-white bg-gradient-to-r from-cyan-500 to-purple-500 rounded-full hover:from-cyan-400 hover:to-purple-400 transition-all duration-300"
-                        >
-                            Register
-                        </Link>
+                        {/* Action Buttons */}
+                        <div className="flex items-center gap-2 ml-3">
+                            <Link
+                                href="/login"
+                                className="px-4 py-1.5 text-xs font-semibold text-white/70 hover:text-white bg-white/5 border border-white/10 rounded-full transition-all duration-300"
+                            >
+                                Login
+                            </Link>
+                            <Link
+                                href="/register"
+                                className="px-4 py-1.5 text-xs font-semibold text-white bg-gradient-to-r from-cyan-500 to-purple-500 rounded-full hover:from-cyan-400 hover:to-purple-400 transition-all duration-300"
+                            >
+                                Register
+                            </Link>
+                        </div>
                     </div>
 
-                    {/* Mobile: Register + Menu */}
+                    {/* Mobile: Actions + Menu */}
                     <div className="flex sm:hidden items-center gap-2">
+                        <Link
+                            href="/login"
+                            className="px-3 py-1.5 text-[10px] font-semibold text-white/70 bg-white/5 border border-white/10 rounded-full"
+                        >
+                            Login
+                        </Link>
                         <Link
                             href="/register"
                             className="px-3 py-1.5 text-[10px] font-semibold text-white bg-gradient-to-r from-cyan-500 to-purple-500 rounded-full"

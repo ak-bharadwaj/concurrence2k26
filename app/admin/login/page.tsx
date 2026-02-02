@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { Lock, User, Loader2, AlertCircle } from "lucide-react";
 import { adminLogin } from "@/lib/auth";
+import { getFriendlyError } from "@/lib/error-handler";
 
 export default function AdminLoginPage() {
     const router = useRouter();
@@ -26,14 +27,14 @@ export default function AdminLoginPage() {
                 router.push("/admin/sub-dashboard");
             }
         } catch (err: any) {
-            setError(err.message || "Login failed");
+            setError(getFriendlyError(err));
         } finally {
             setLoading(false);
         }
     };
 
     return (
-        <div className="min-h-screen bg-black flex items-center justify-center px-4">
+        <div className="min-h-screen bg-transparent flex items-center justify-center px-4">
             <motion.div
                 initial={{ opacity: 0, scale: 0.95 }}
                 animate={{ opacity: 1, scale: 1 }}

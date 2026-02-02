@@ -16,9 +16,9 @@ import {
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { updateStatus, getActiveGroupLink, deleteUser } from "@/lib/supabase-actions";
-import { sendApprovalEmail, sendRejectionEmail } from "@/lib/email-service";
 import { getAdminSession, adminLogout } from "@/lib/auth";
 import Image from "next/image";
+import { getFriendlyError } from "@/lib/error-handler";
 
 export default function SubDashboard() {
     const router = useRouter();
@@ -37,12 +37,7 @@ export default function SubDashboard() {
         setAdmin(session);
         fetchUsers();
 
-        // 1. Set up Polling (Failsafe for real-time)
-        const pollInterval = setInterval(() => {
-            fetchUsers();
-        }, 10000); // Refresh every 10 seconds
-
-        // 2. Set up Realtime Subscription
+        // Real-time Subscription (removed redundant polling for performance)
         const channel = supabase
             .channel("users_changes")
             .on(
@@ -55,7 +50,6 @@ export default function SubDashboard() {
             .subscribe();
 
         return () => {
-            clearInterval(pollInterval);
             supabase.removeChannel(channel);
         };
     }, []);
@@ -95,39 +89,17 @@ export default function SubDashboard() {
                 const confirm = window.confirm(`Are you sure you want to APPROVE ${user.name}?`);
                 if (!confirm) return;
 
-                console.log(`[SubDashboard] Approving user: ${user.id} (${user.email})`);
-                const updatedUser = await updateStatus(user.id, admin.id, "APPROVED", "APPROVE_PAYMENT");
-
-                if (!updatedUser) {
-                    console.warn("[SubDashboard] User already updated by another admin.");
-                    alert("Action failed: User status was already updated by another admin.");
-                    return;
-                }
-
                 const link = await getActiveGroupLink(user.college);
-                console.log(`[SubDashboard] Fetched group link for ${user.college}: ${link}`);
 
-                console.log(`[SubDashboard] Triggering approval email to ${user.email}`);
-                await sendApprovalEmail(user.email, user.name, link || "");
+                await updateStatus(user.id, admin.id, "APPROVED", "APPROVE_PAYMENT", link || "");
+                if (!link) console.warn(`[SubDashboard] No active group link found for ${user.college}`);
                 if (!link) console.warn(`[SubDashboard] No active group link found for ${user.college}, sent email without join button.`);
             } else if (action === "REJECTED") {
                 const confirm = window.confirm(`Are you sure you want to REJECT ${user.name}?`);
                 if (!confirm) return;
 
-                console.log(`[SubDashboard] Rejecting user: ${user.id} (${user.email})`);
-                const updatedUser = await updateStatus(user.id, admin.id, "REJECTED", "REJECT_PAYMENT");
-
-                if (!updatedUser) {
-                    console.warn("[SubDashboard] User already updated by another admin.");
-                    alert("Action failed: User status was already updated by another admin.");
-                    return;
-                }
-
-                console.log(`[SubDashboard] Triggering rejection email to ${user.email}`);
-                await sendRejectionEmail(user.email, user.name);
-
+                await updateStatus(user.id, admin.id, "REJECTED", "REJECT_PAYMENT");
                 // Delete from DB as requested: "If rejects, no need to enter in the main database"
-                console.log(`[SubDashboard] Deleting rejected user from database: ${user.id}`);
                 await deleteUser(user.id);
                 fetchUsers(); // Refresh the list
             } else if (action === "VERIFYING") {
@@ -140,7 +112,7 @@ export default function SubDashboard() {
             }
 
         } catch (err: any) {
-            alert("Action failed: " + (err.message || "Unknown error"));
+            alert("Action failed: " + getFriendlyError(err));
             console.error("[SubDashboard Error]", err);
         } finally {
             setProcessingId(null);
@@ -156,7 +128,7 @@ export default function SubDashboard() {
     if (!admin) return null;
 
     return (
-        <div className="min-h-screen bg-black text-white">
+        <div className="min-h-screen bg-transparent text-white">
             <nav className="border-b border-white/10 bg-white/[0.02] backdrop-blur-xl sticky top-0 z-50">
                 <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
                     <div className="flex items-center gap-3">

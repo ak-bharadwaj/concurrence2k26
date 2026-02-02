@@ -1,0 +1,727 @@
+"use client";
+
+import { useEffect, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase";
+import { getJoinRequests, respondToJoinRequest, removeMemberFromTeam, leaveTeam, updateTeamSettings, addMemberToTeam, updateMemberDetails, deleteTeam } from "@/lib/supabase-actions";
+import { Loader2, Users, Crown, Copy, Check, UserMinus, LogOut, Settings, ArrowLeft, UserPlus, X, Edit3, Save, Trash2, ShieldCheck } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { GlassNavbar } from "@/components/glass-navbar";
+import { getFriendlyError } from "@/lib/error-handler";
+
+export default function TeamPage() {
+    const [user, setUser] = useState<any>(null);
+    const [team, setTeam] = useState<any>(null);
+    const [isCreatingFirstSquad, setIsCreatingFirstSquad] = useState(false);
+    const [members, setMembers] = useState<any[]>([]);
+    const [joinRequests, setJoinRequests] = useState<any[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
+    const [copied, setCopied] = useState(false);
+    const [processingId, setProcessingId] = useState<string | null>(null);
+    const [debounceTimer, setDebounceTimer] = useState<any>(null);
+    const [isEditingName, setIsEditingName] = useState(false);
+    const [newName, setNewName] = useState("");
+    const [newMemberRegNo, setNewMemberRegNo] = useState("");
+    const [isAddingMember, setIsAddingMember] = useState(false);
+    const [editingMember, setEditingMember] = useState<any>(null);
+    const [isSavingMember, setIsSavingMember] = useState(false);
+    const [showAddMemberModal, setShowAddMemberModal] = useState(false);
+    const [newMemberData, setNewMemberData] = useState({ name: "", email: "", reg_no: "", phone: "", branch: "", college: "RGM", year: "", other_college: "" });
+    const router = useRouter();
+
+    const fetchTeamData = useCallback(async (silent: boolean = false) => {
+        const cookies = document.cookie.split(';').reduce((acc, cookie) => {
+            const [key, value] = cookie.trim().split('=');
+            acc[key] = value;
+            return acc;
+        }, {} as any);
+
+        const userId = cookies['student_session'];
+        if (!userId) {
+            router.push("/login");
+            return;
+        }
+
+        try {
+            if (!silent) setLoading(true);
+            const { data: userData, error: uErr } = await supabase
+                .from("users")
+                .select("*")
+                .eq("id", userId)
+                .single();
+
+            if (uErr) throw uErr;
+            setUser(userData);
+
+            if (!userData.team_id) {
+                setIsCreatingFirstSquad(true);
+                setLoading(false);
+                return;
+            }
+
+            const { data: teamData, error: tErr } = await supabase
+                .from("teams")
+                .select("*")
+                .eq("id", userData.team_id)
+                .single();
+
+            if (tErr) throw tErr;
+            setTeam(teamData);
+
+            const { data: membersData } = await supabase
+                .from("users")
+                .select("id, name, reg_no, role, status, email")
+                .eq("team_id", userData.team_id)
+                .order("role", { ascending: false });
+
+            setMembers(membersData || []);
+
+            if (userData.role === "LEADER") {
+                const requests = await getJoinRequests(userData.team_id);
+                setJoinRequests(requests || []);
+            }
+        } catch (err: any) {
+            setError(getFriendlyError(err));
+        } finally {
+            setLoading(false);
+        }
+    }, [router]);
+
+    const debouncedFetch = useCallback((silent: boolean = true) => {
+        if (debounceTimer) clearTimeout(debounceTimer);
+        const timeout = setTimeout(() => {
+            fetchTeamData(silent);
+        }, 10);
+        setDebounceTimer(timeout);
+    }, [debounceTimer, fetchTeamData]);
+
+    useEffect(() => {
+        fetchTeamData();
+    }, [fetchTeamData]);
+
+    useEffect(() => {
+        const sessionCookie = document.cookie.split(';').find(c => c.trim().startsWith('student_session='));
+        const userId = sessionCookie?.split('=')[1];
+
+        if (userId && team?.id) {
+            const teamChannel = supabase.channel(`team_page_sync_${userId}`);
+
+            teamChannel
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'teams', filter: `id=eq.${team.id}` }, () => debouncedFetch(true))
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'users', filter: `team_id=eq.${team.id}` }, () => debouncedFetch(true))
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'join_requests', filter: `team_id=eq.${team.id}` }, () => debouncedFetch(true))
+                .subscribe();
+
+            return () => { teamChannel.unsubscribe(); };
+        }
+    }, [team?.id, debouncedFetch]);
+
+    const handleCopyCode = () => {
+        navigator.clipboard.writeText(team.unique_code);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+    };
+
+    const handleJoinRequest = async (requestId: string, action: 'APPROVED' | 'REJECTED') => {
+        try {
+            setProcessingId(requestId);
+            await respondToJoinRequest(requestId, action);
+            await fetchTeamData();
+        } catch (err: any) {
+            alert(getFriendlyError(err));
+        } finally {
+            setProcessingId(null);
+        }
+    };
+
+    const handleRemoveMember = async (memberId: string, memberName: string) => {
+        if (!confirm(`Remove ${memberName} from the team?`)) return;
+        try {
+            setProcessingId(memberId);
+            await removeMemberFromTeam(memberId, team.id);
+            await fetchTeamData();
+        } catch (err: any) {
+            alert(getFriendlyError(err));
+        } finally {
+            setProcessingId(null);
+        }
+    };
+
+    const handleLeaveTeam = async () => {
+        if (!confirm("Are you sure you want to leave this team?")) return;
+        try {
+            setLoading(true);
+            await leaveTeam(user.id);
+            router.push("/dashboard");
+        } catch (err: any) {
+            alert(getFriendlyError(err));
+            setLoading(false);
+        }
+    };
+
+    const handleDisbandTeam = async () => {
+        if (!confirm("CRITICAL ACTION: Disbanding the squad will remove all members and delete the team record permanently. Proceed?")) return;
+        try {
+            setLoading(true);
+            await deleteTeam(team.id);
+            router.push("/dashboard");
+        } catch (err: any) {
+            alert(getFriendlyError(err));
+            setLoading(false);
+        }
+    };
+
+    const handleUpdateTeamName = async () => {
+        if (!newName.trim() || newName === team.name) {
+            setIsEditingName(false);
+            return;
+        }
+        try {
+            setProcessingId('update_name');
+            await updateTeamSettings(team.id, { name: newName });
+            setTeam({ ...team, name: newName });
+            setIsEditingName(false);
+        } catch (err: any) {
+            alert(getFriendlyError(err));
+        } finally {
+            setProcessingId(null);
+        }
+    };
+
+    const handleAddMemberByRegNo = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!newMemberData.reg_no.trim() || !newMemberData.name.trim()) return;
+        try {
+            setIsAddingMember(true);
+            await addMemberToTeam(newMemberData, team.id);
+            alert("Member enrolled successfully!");
+            setNewMemberData({ name: "", email: "", reg_no: "", phone: "", branch: "", college: "RGM", year: "", other_college: "" });
+            setShowAddMemberModal(false);
+            await fetchTeamData();
+        } catch (err: any) {
+            alert(getFriendlyError(err));
+        } finally {
+            setIsAddingMember(false);
+        }
+    };
+
+    const handleCreateFirstSquad = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!newName.trim()) return;
+        try {
+            setIsAddingMember(true);
+            const unique_code = Math.random().toString(36).substring(2, 8).toUpperCase();
+
+            // 1. Create Team
+            const { data: teamData, error: tErr } = await supabase
+                .from("teams")
+                .insert([{
+                    name: newName,
+                    unique_code,
+                    payment_mode: "INDIVIDUAL",
+                    max_members: 5,
+                    leader_id: user.id
+                }])
+                .select()
+                .single();
+
+            if (tErr) throw tErr;
+
+            // 2. Update User
+            const { error: uErr } = await supabase
+                .from("users")
+                .update({ team_id: teamData.id, role: "LEADER" })
+                .eq("id", user.id);
+
+            if (uErr) throw uErr;
+
+            alert(`Squad ${newName} Initialized!`);
+            setIsCreatingFirstSquad(false);
+            await fetchTeamData();
+        } catch (err: any) {
+            alert(getFriendlyError(err));
+        } finally {
+            setIsAddingMember(false);
+        }
+    };
+
+    if (loading || (!team && !error && !isCreatingFirstSquad)) return <div className="min-h-screen flex items-center justify-center"><Loader2 className="w-8 h-8 text-cyan-500 animate-spin" /></div>;
+
+    if (error) return (
+        <div className="min-h-screen flex items-center justify-center p-4">
+            <div className="glass-card p-8 max-w-md text-center">
+                <p className="text-red-500 mb-4">{error}</p>
+                <button onClick={() => router.push("/dashboard")} className="btn-primary">Back to Dashboard</button>
+            </div>
+        </div>
+    );
+
+    const isLeader = user?.role === "LEADER";
+
+    return (
+        <div className="min-h-screen text-white pt-28 pb-20 px-4 relative bg-transparent font-sans">
+            <GlassNavbar />
+            <div className="container mx-auto max-w-6xl relative z-10">
+                {/* Header */}
+                <div className="mb-8">
+                    <button onClick={() => router.push("/dashboard")} className="flex items-center gap-2 text-white/60 hover:text-white transition-colors mb-4">
+                        <ArrowLeft className="w-4 h-4" />
+                        Back to Dashboard
+                    </button>
+                    <h1 className="text-4xl font-black uppercase tracking-tighter">Team Management</h1>
+                </div>
+
+                {/* Team Overview */}
+                {!isCreatingFirstSquad && (
+                    <div className="glass-card p-6 mb-6">
+                        <div className="flex items-start justify-between mb-6">
+                            <div className="flex-1">
+                                <p className="text-xs text-white/40 uppercase tracking-widest mb-1">Team Name</p>
+                                {isEditingName ? (
+                                    <div className="flex items-center gap-2">
+                                        <input
+                                            autoFocus
+                                            value={newName}
+                                            onChange={(e) => setNewName(e.target.value)}
+                                            className="bg-white/5 border border-cyan-500/50 rounded-xl px-4 py-2 text-2xl font-bold outline-none w-full max-w-md"
+                                            placeholder="New squad name..."
+                                        />
+                                        <button onClick={handleUpdateTeamName} className="p-2 bg-green-500 text-black rounded-lg hover:bg-green-400 transition-colors">
+                                            <Check className="w-5 h-5" />
+                                        </button>
+                                        <button onClick={() => setIsEditingName(false)} className="p-2 bg-white/10 text-white rounded-lg hover:bg-white/20 transition-colors">
+                                            <X className="w-5 h-5" />
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <div className="flex items-center gap-3 group">
+                                        <h2 className="text-3xl font-bold">{team?.name || "Squad Alpha"}</h2>
+                                        {isLeader && team && (
+                                            <button onClick={() => { setNewName(team.name); setIsEditingName(true); }} className="p-1.5 text-white/20 hover:text-cyan-400 opacity-0 group-hover:opacity-100 transition-all">
+                                                <Edit3 className="w-4 h-4" />
+                                            </button>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                            {isLeader && (
+                                <div className="flex items-center gap-2 px-3 py-1.5 bg-yellow-500/10 border border-yellow-500/20 rounded-full">
+                                    <Crown className="w-4 h-4 text-yellow-500" />
+                                    <span className="text-xs font-bold text-yellow-500 uppercase">Leader</span>
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div className="bg-white/5 p-4 rounded-xl border border-white/10">
+                                <p className="text-xs text-white/40 uppercase tracking-widest mb-1">Team Code</p>
+                                <div className="flex items-center gap-2">
+                                    <p className="text-2xl font-mono font-bold text-cyan-400">{team?.unique_code || "------"}</p>
+                                    <button onClick={handleCopyCode} className="p-2 hover:bg-white/10 rounded-lg transition-colors">
+                                        {copied ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4 text-white/40" />}
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="bg-white/5 p-4 rounded-xl border border-white/10">
+                                <p className="text-xs text-white/40 uppercase tracking-widest mb-1">Members</p>
+                                <p className="text-2xl font-bold">{members.length}/{team?.max_members || 5}</p>
+                            </div>
+
+                            <div className="bg-white/5 p-4 rounded-xl border border-white/10">
+                                <p className="text-xs text-white/40 uppercase tracking-widest mb-1">Payment Mode</p>
+                                <p className="text-2xl font-bold uppercase">{team?.payment_mode || "INDIVIDUAL"}</p>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Join Requests & Add Member (Leader Only) */}
+                {(isLeader && !isCreatingFirstSquad) && (
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+                        {/* Add Member Manually */}
+                        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="glass-card p-6 border-cyan-500/20">
+                            <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
+                                <UserPlus className="w-5 h-5 text-cyan-400" />
+                                Add Squad Member
+                            </h3>
+                            <p className="text-xs text-white/40 mb-4 uppercase font-bold tracking-widest">Enroll participants directly into your squad</p>
+                            <button
+                                onClick={() => {
+                                    setNewMemberData({ ...newMemberData, college: team?.leader?.college || "" });
+                                    setShowAddMemberModal(true);
+                                }}
+                                disabled={members.length >= (team?.max_members || 5)}
+                                className="w-full py-4 bg-cyan-500 text-black font-black rounded-xl text-[10px] uppercase hover:bg-cyan-400 transition-all disabled:opacity-20 flex items-center justify-center gap-2 whitespace-nowrap"
+                            >
+                                <UserPlus className="w-4 h-4" /> Enroll New Member
+                            </button>
+                            {members.length >= team.max_members && (
+                                <p className="text-[10px] text-red-500 font-bold uppercase text-center mt-3">Your squad has reached its limit</p>
+                            )}
+                        </motion.div>
+
+                        {/* Public Requests */}
+                        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="glass-card p-6">
+                            <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
+                                <UserPlus className="w-5 h-5 text-purple-400" />
+                                Join Requests ({joinRequests.length})
+                            </h3>
+
+                            <div className="max-h-[150px] overflow-y-auto scrollbar-hide space-y-3">
+                                {joinRequests.length > 0 ? joinRequests.map((req: any) => (
+                                    <div key={req.id} className="flex items-center justify-between p-4 bg-white/5 rounded-xl border border-white/10">
+                                        <div>
+                                            <p className="font-bold text-sm">{req.users.name}</p>
+                                            <p className="text-[10px] text-white/40 uppercase font-mono">{req.users.reg_no}</p>
+                                        </div>
+                                        <div className="flex gap-2">
+                                            <button
+                                                onClick={() => handleJoinRequest(req.id, 'APPROVED')}
+                                                disabled={processingId === req.id}
+                                                className="p-2 bg-green-500/10 text-green-500 rounded-lg hover:bg-green-500 hover:text-white transition-all disabled:opacity-50"
+                                            >
+                                                <Check className="w-4 h-4" />
+                                            </button>
+                                            <button
+                                                onClick={() => handleJoinRequest(req.id, 'REJECTED')}
+                                                disabled={processingId === req.id}
+                                                className="p-2 bg-red-500/10 text-red-500 rounded-lg hover:bg-red-500 hover:text-white transition-all disabled:opacity-50"
+                                            >
+                                                <X className="w-4 h-4" />
+                                            </button>
+                                        </div>
+                                    </div>
+                                )) : (
+                                    <div className="h-full flex items-center justify-center text-white/20 text-[10px] uppercase font-bold tracking-widest italic pt-4">
+                                        No pending requests
+                                    </div>
+                                )}
+                            </div>
+                        </motion.div>
+                    </div>
+                )}
+
+                {/* Team Members */}
+                {!isCreatingFirstSquad && (
+                    <div className="glass-card p-6 mb-6">
+                        <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
+                            <Users className="w-5 h-5 text-purple-400" />
+                            Team Members
+                        </h3>
+
+                        <div className="space-y-3">
+                            {members.map((member: any) => (
+                                <div key={member.id} className="flex items-center justify-between p-4 bg-white/5 rounded-xl border border-white/10">
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-cyan-500 flex items-center justify-center text-sm font-bold">
+                                            {member.name[0]}
+                                        </div>
+                                        <div>
+                                            <div className="flex items-center gap-2">
+                                                <p className="font-bold">{member.name}</p>
+                                                {member.role === 'LEADER' && <Crown className="w-4 h-4 text-yellow-500" />}
+                                            </div>
+                                            <p className="text-xs text-white/60">{member.reg_no} • {member.email}</p>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex items-center gap-3">
+                                        <div className={`px-3 py-1 rounded-full text-xs font-bold uppercase ${member.status === 'APPROVED' ? 'bg-green-500/20 text-green-500' :
+                                            member.status === 'REJECTED' ? 'bg-red-500/20 text-red-500' :
+                                                'bg-yellow-500/20 text-yellow-500'
+                                            }`}>
+                                            {member.status}
+                                        </div>
+
+                                        {isLeader && (
+                                            <div className="flex items-center gap-1">
+                                                <button
+                                                    onClick={() => setEditingMember(member)}
+                                                    className="p-2 text-white/20 hover:text-cyan-400 hover:bg-cyan-500/10 rounded-lg transition-all"
+                                                    title="Edit member details"
+                                                >
+                                                    <Edit3 className="w-4 h-4" />
+                                                </button>
+
+                                                {member.role !== 'LEADER' && (
+                                                    <button
+                                                        onClick={() => handleRemoveMember(member.id, member.name)}
+                                                        disabled={processingId === member.id}
+                                                        className="p-2 text-white/20 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"
+                                                        title="Remove from squad"
+                                                    >
+                                                        {processingId === member.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserMinus className="w-4 h-4" />}
+                                                    </button>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+                {/* Actions */}
+                {isCreatingFirstSquad ? (
+                    <div className="glass-card p-12 text-center max-w-2xl mx-auto border-cyan-500/30">
+                        <Users className="w-16 h-16 text-cyan-500 mx-auto mb-6" />
+                        <h2 className="text-3xl font-black uppercase italic mb-2 tracking-tighter">Initialize Your Unit</h2>
+                        <p className="text-white/40 text-sm mb-8">You are currently operating as a lone warrior. Deploy a squad designation to recruit allies and unlock deeper potential.</p>
+
+                        <form onSubmit={handleCreateFirstSquad} className="space-y-4 max-w-sm mx-auto">
+                            <input
+                                required
+                                value={newName}
+                                onChange={(e) => setNewName(e.target.value)}
+                                placeholder="ENTER SQUAD DESIGNATION..."
+                                className="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 text-center font-black uppercase tracking-widest outline-none focus:border-cyan-500 focus:bg-white/10 transition-all mb-4"
+                            />
+                            <button
+                                disabled={isAddingMember}
+                                className="w-full py-4 bg-cyan-500 text-black font-black rounded-2xl text-[10px] uppercase hover:bg-cyan-400 transition-all flex items-center justify-center gap-2 group"
+                            >
+                                {isAddingMember ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Plus className="w-4 h-4 group-hover:rotate-90 transition-transform" /> Confirm Deployment</>}
+                            </button>
+                        </form>
+                    </div>
+                ) : isLeader ? (
+                    <div className="glass-card p-6 border-red-500/20 bg-red-500/5 mt-8">
+                        <h3 className="text-xl font-bold mb-4 flex items-center gap-2 text-red-500">
+                            <ShieldCheck className="w-5 h-5" />
+                            Danger Zone
+                        </h3>
+                        <p className="text-xs text-white/40 mb-6">Disbanding the team will remove all members and delete the team record. This action is irreversible.</p>
+                        <button
+                            onClick={handleDisbandTeam}
+                            className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-red-600/10 text-red-500 border border-red-500/20 rounded-xl hover:bg-red-600 hover:text-white transition-all font-black uppercase tracking-widest text-xs"
+                        >
+                            <Trash2 className="w-5 h-5" />
+                            Disband Squad
+                        </button>
+                    </div>
+                ) : (
+                    <div className="glass-card p-6 mt-8">
+                        <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
+                            <Settings className="w-5 h-5 text-white/40" />
+                            Actions
+                        </h3>
+                        <button
+                            onClick={handleLeaveTeam}
+                            className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-red-500/20 text-red-500 rounded-xl hover:bg-red-500 hover:text-white transition-all font-bold"
+                        >
+                            <LogOut className="w-5 h-5" />
+                            Leave Team
+                        </button>
+                    </div>
+                )}
+            </div>
+
+            {/* Edit Member Modal */}
+            <AnimatePresence>
+                {editingMember && (
+                    <div className="fixed inset-0 bg-black/80 backdrop-blur-xl z-[100] flex items-center justify-center p-4">
+                        <motion.div
+                            initial={{ scale: 0.9, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            exit={{ scale: 0.9, opacity: 0 }}
+                            className="bg-neutral-900 border border-white/10 rounded-3xl p-8 max-w-md w-full shadow-2xl space-y-6"
+                        >
+                            <div className="flex items-center justify-between">
+                                <h2 className="text-xl font-black text-white uppercase italic">Edit Member Info</h2>
+                                <button onClick={() => setEditingMember(null)}><X className="w-6 h-6 text-white/40" /></button>
+                            </div>
+
+                            <form onSubmit={handleUpdateMember} className="space-y-4">
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-black uppercase text-white/30">Full Name</label>
+                                    <input
+                                        required
+                                        value={editingMember.name}
+                                        onChange={(e) => setEditingMember({ ...editingMember, name: e.target.value })}
+                                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 outline-none focus:border-cyan-500/30 transition-all"
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-black uppercase text-white/30">Reg No (Read-only)</label>
+                                    <input
+                                        disabled
+                                        value={editingMember.reg_no}
+                                        className="w-full bg-white/5 border border-white/5 rounded-xl px-4 py-3 text-white/20 font-mono"
+                                    />
+                                </div>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-black uppercase text-white/30">Branch</label>
+                                        <input
+                                            value={editingMember.branch || ''}
+                                            onChange={(e) => setEditingMember({ ...editingMember, branch: e.target.value })}
+                                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 outline-none focus:border-cyan-500/30 transition-all font-mono text-xs uppercase"
+                                        />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-black uppercase text-white/30">College</label>
+                                        <input
+                                            value={editingMember.college || ''}
+                                            onChange={(e) => setEditingMember({ ...editingMember, college: e.target.value })}
+                                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 outline-none focus:border-cyan-500/30 transition-all font-mono text-xs uppercase"
+                                        />
+                                    </div>
+                                </div>
+
+                                <button
+                                    type="submit"
+                                    disabled={isSavingMember}
+                                    className="w-full py-4 bg-cyan-500 text-black font-black rounded-xl text-xs uppercase hover:bg-cyan-400 transition-all flex items-center justify-center gap-2"
+                                >
+                                    {isSavingMember ? <Loader2 className="w-5 h-5 animate-spin" /> : <><Save className="w-4 h-4" /> Save Intel</>}
+                                </button>
+                            </form>
+                        </motion.div>
+                    </div>
+                )}
+            </AnimatePresence>
+
+            {/* Add Member Modal */}
+            <AnimatePresence>
+                {showAddMemberModal && (
+                    <div className="fixed inset-0 bg-black/80 backdrop-blur-xl z-[100] flex items-center justify-center p-4">
+                        <motion.div
+                            initial={{ scale: 0.9, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            exit={{ scale: 0.9, opacity: 0 }}
+                            className="bg-neutral-900 border border-white/10 rounded-3xl p-8 max-w-lg w-full shadow-2xl space-y-6"
+                        >
+                            <div className="flex items-center justify-between">
+                                <h2 className="text-xl font-black text-white uppercase italic">Enroll New Squad Member</h2>
+                                <button onClick={() => setShowAddMemberModal(false)}><X className="w-6 h-6 text-white/40" /></button>
+                            </div>
+
+                            <form onSubmit={handleAddMemberByRegNo} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-black uppercase text-white/30">Registration ID</label>
+                                    <input
+                                        required
+                                        value={newMemberData.reg_no}
+                                        onChange={(e) => setNewMemberData({ ...newMemberData, reg_no: e.target.value.toUpperCase() })}
+                                        placeholder="REQUIRED"
+                                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 outline-none focus:border-cyan-500/30 transition-all font-mono"
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-black uppercase text-white/30">Full Name</label>
+                                    <input
+                                        required
+                                        value={newMemberData.name}
+                                        onChange={(e) => setNewMemberData({ ...newMemberData, name: e.target.value })}
+                                        placeholder="REQUIRED"
+                                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 outline-none focus:border-cyan-500/30 transition-all"
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-black uppercase text-white/30">Email Address</label>
+                                    <input
+                                        required
+                                        type="email"
+                                        value={newMemberData.email}
+                                        onChange={(e) => setNewMemberData({ ...newMemberData, email: e.target.value })}
+                                        placeholder="REQUIRED"
+                                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 outline-none focus:border-cyan-500/30 transition-all"
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-black uppercase text-white/30">Phone (Optional)</label>
+                                    <input
+                                        value={newMemberData.phone}
+                                        onChange={(e) => setNewMemberData({ ...newMemberData, phone: e.target.value })}
+                                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 outline-none focus:border-cyan-500/30 transition-all"
+                                    />
+                                </div>
+
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-black uppercase text-white/30">College</label>
+                                    <select
+                                        value={newMemberData.college}
+                                        onChange={(e) => setNewMemberData({ ...newMemberData, college: e.target.value })}
+                                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 outline-none focus:border-cyan-500/30 transition-all text-sm"
+                                    >
+                                        <option value="RGM" className="bg-neutral-900">RGM</option>
+                                        <option value="OTHERS" className="bg-neutral-900">Others</option>
+                                    </select>
+                                </div>
+
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-black uppercase text-white/30">Year</label>
+                                    <select
+                                        required
+                                        value={newMemberData.year}
+                                        onChange={(e) => setNewMemberData({ ...newMemberData, year: e.target.value })}
+                                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 outline-none focus:border-cyan-500/30 transition-all text-sm"
+                                    >
+                                        <option value="" className="bg-neutral-900">Select Year</option>
+                                        {["I", "II", "III", "IV"].map(y => <option key={y} value={y} className="bg-neutral-900">{y}</option>)}
+                                    </select>
+                                </div>
+
+                                <div className="space-y-2 md:col-span-1">
+                                    <label className="text-[10px] font-black uppercase text-white/30">Branch</label>
+                                    <select
+                                        required
+                                        value={newMemberData.branch}
+                                        onChange={(e) => setNewMemberData({ ...newMemberData, branch: e.target.value })}
+                                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 outline-none focus:border-cyan-500/30 transition-all text-sm"
+                                    >
+                                        <option value="" className="bg-neutral-900">Select Branch</option>
+                                        {["CSE", "CSE-AIML", "CSE-DS", "CSE-BS", "EEE", "ECE", "MECH", "CIVIL", "OTHERS"].map(b => (
+                                            <option key={b} value={b} className="bg-neutral-900">{b}</option>
+                                        ))}
+                                    </select>
+                                </div>
+
+                                {newMemberData.college === "OTHERS" && (
+                                    <div className="md:col-span-2 space-y-2">
+                                        <label className="text-[10px] font-black uppercase text-white/30">College Name</label>
+                                        <input
+                                            required
+                                            value={newMemberData.other_college}
+                                            onChange={(e) => setNewMemberData({ ...newMemberData, other_college: e.target.value })}
+                                            placeholder="Enter your college name"
+                                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 outline-none focus:border-cyan-500/30 transition-all"
+                                        />
+                                    </div>
+                                )}
+
+                                <div className="md:col-span-2 space-y-2">
+                                    <label className="text-[10px] font-black uppercase text-white/30">Branch</label>
+                                    <select
+                                        required
+                                        value={newMemberData.branch}
+                                        onChange={(e) => setNewMemberData({ ...newMemberData, branch: e.target.value })}
+                                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 outline-none focus:border-cyan-500/30 transition-all text-sm"
+                                    >
+                                        <option value="" className="bg-neutral-900">Select Branch</option>
+                                        {["CSE", "CSE-AIML", "CSE-DS", "CSE-BS", "EEE", "ECE", "MECH", "CIVIL", "OTHERS"].map(b => (
+                                            <option key={b} value={b} className="bg-neutral-900">{b}</option>
+                                        ))}
+                                    </select>
+                                </div>
+
+                                <div className="md:col-span-2 pt-4">
+                                    <button
+                                        type="submit"
+                                        disabled={isAddingMember}
+                                        className="w-full py-4 bg-cyan-500 text-black font-black rounded-xl text-xs uppercase hover:bg-cyan-400 transition-all flex items-center justify-center gap-2"
+                                    >
+                                        {isAddingMember ? <Loader2 className="w-5 h-5 animate-spin" /> : <><UserPlus className="w-4 h-4" /> Deploy Member</>}
+                                    </button>
+                                </div>
+                            </form>
+                        </motion.div>
+                    </div>
+                )}
+            </AnimatePresence>
+        </div>
+    );
+}

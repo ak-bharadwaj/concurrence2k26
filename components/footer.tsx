@@ -182,13 +182,15 @@ export function Footer() {
           </div>
 
           {/* Copyright */}
-          <div className="mt-6 pt-4 border-t border-white/[0.04] flex flex-col sm:flex-row justify-between items-center gap-2">
-            <p className="text-white/20 text-[10px]">
-              © 2026 TechSprint. {collegeInfo.department}
-            </p>
-            <p className="text-white/15 text-[10px]">
-              {collegeInfo.name}
-            </p>
+          <div className="mt-6 pt-4 border-t border-white/[0.04] flex flex-col sm:flex-row justify-between items-center gap-2 text-[10px] text-white/20">
+            <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-4 text-center sm:text-left">
+              <p>© 2026 TechSprint. {collegeInfo.department}</p>
+              <p className="hidden sm:block">•</p>
+              <p>{collegeInfo.name}</p>
+            </div>
+            <Link href="/admin" className="hover:text-cyan-400/50 transition-colors uppercase tracking-widest text-[9px] font-bold">
+              Admin Portal
+            </Link>
           </div>
         </div>
       </div>

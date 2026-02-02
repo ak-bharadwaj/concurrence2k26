@@ -11,26 +11,8 @@ import { Button } from "@/components/ui/moving-border";
 
 export function Hero() {
   return (
-    <section className="relative min-h-screen flex items-center justify-center overflow-hidden">
-      {/* FloatingLines Background */}
-      <div className="absolute inset-0 -z-10">
-        <FloatingLinesErrorBoundary>
-          <FloatingLines
-            linesGradient={["#06b6d4", "#3b82f6", "#8b5cf6", "#ec4899"]}
-            enabledWaves={["top", "middle", "bottom"]}
-            lineCount={[4, 6, 4]}
-            lineDistance={[8, 6, 10]}
-            animationSpeed={0.8}
-            interactive={true}
-            bendRadius={6}
-            bendStrength={-0.4}
-            parallax={true}
-            parallaxStrength={0.15}
-            mixBlendMode="screen"
-          />
-        </FloatingLinesErrorBoundary>
-        <div className="absolute inset-0 bg-gradient-to-b from-background/30 via-background/60 to-background" />
-      </div>
+    <section className="relative min-h-screen flex items-center justify-center">
+      {/* Background is now global */}
 
       <div className="container mx-auto px-4 text-center pt-24 sm:pt-20">
         <motion.div
