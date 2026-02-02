@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
     User,
@@ -63,7 +63,7 @@ const GlassNavbar = () => (
     </nav>
 );
 
-export default function RegisterPage() {
+function RegisterPageContent() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const [step, setStep] = useState<Step>(0);
@@ -704,6 +704,18 @@ export default function RegisterPage() {
             setAssignedQR(qr);
         } catch (e) { console.error(e); } finally { setLoading(false); }
     }
+}
+
+export default function RegisterPage() {
+    return (
+        <Suspense fallback={
+            <div className="min-h-screen flex items-center justify-center bg-black">
+                <Loader2 className="w-8 h-8 text-cyan-500 animate-spin" />
+            </div>
+        }>
+            <RegisterPageContent />
+        </Suspense>
+    );
 }
 
 function ModeCard({ icon: Icon, title, desc, price, color, onClick }: any) {
