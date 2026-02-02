@@ -72,6 +72,7 @@ export default function MainDashboard() {
 
     // Squad Command Center State
     const [teamViewMode, setTeamViewMode] = useState<'ALL' | 'SOLO'>('ALL');
+    const [viewMode, setViewMode] = useState<'VISUAL' | 'GRID'>('GRID');
     const [recruitState, setRecruitState] = useState<{ teamId: string, slotId: number } | null>(null);
     const [lastSynced, setLastSynced] = useState<Date | null>(null);
 
@@ -292,6 +293,25 @@ export default function MainDashboard() {
                 return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
             });
 
+            const unifiedTeams = [
+                ...(teams || []).map((t: any) => ({
+                    ...t,
+                    memberCount: (users || []).filter((u: any) => u.team_id === t.id).length,
+                    isVirtual: false,
+                    members: (users || []).filter((u: any) => u.team_id === t.id)
+                })),
+                ...(users || []).filter((u: any) => !u.team_id).map((u: any) => ({
+                    id: `SOLO-${u.id}`,
+                    name: `${u.name}'s Party`,
+                    unique_code: 'SOLO',
+                    isVirtual: true,
+                    payment_mode: 'INDIVIDUAL',
+                    memberCount: 1,
+                    members: [u],
+                    created_at: u.created_at
+                }))
+            ].sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
             setData({
                 users: processedUsers,
                 admins: admins || [],
@@ -299,10 +319,7 @@ export default function MainDashboard() {
                 emails: emails || [],
                 groups: groups || [],
                 logs: logs || [],
-                teams: (teams || []).map((t: any) => ({
-                    ...t,
-                    memberCount: (users || []).filter((u: any) => u.team_id === t.id).length
-                }))
+                teams: unifiedTeams
             });
             setLastSynced(new Date());
         } catch (err: any) {
@@ -1226,59 +1243,161 @@ export default function MainDashboard() {
 
                     {activeTab === 'TEAMS' && (
                         <div className="space-y-6">
-                            <div className="flex justify-between items-center mb-6">
+                            <div className="flex justify-between items-center mb-6 px-1">
                                 <div>
-                                    <h2 className="text-xl font-black tracking-tight text-white">SQUAD COMMAND CENTER</h2>
-                                    <p className="text-[10px] text-white/40 font-bold uppercase tracking-widest">Manage Legions & Recruit Warriors</p>
+                                    <h2 className="text-xl font-black tracking-tight text-white uppercase italic">Squad Command Center</h2>
+                                    <p className="text-[10px] text-white/40 font-bold uppercase tracking-widest pl-0.5">Manage Legions & Solo Warriors</p>
                                 </div>
-                                <div className="flex gap-3">
-                                    <button
-                                        onClick={() => setTeamViewMode(prev => prev === 'ALL' ? 'SOLO' : 'ALL')}
-                                        className={`flex items-center gap-2 px-4 py-2 border rounded-lg text-xs font-bold uppercase tracking-widest transition-all ${teamViewMode === 'SOLO' ? 'bg-cyan-500/10 border-cyan-500 text-cyan-400' : 'bg-white/5 border-white/10 text-white/40 hover:text-white'}`}
-                                    >
-                                        {teamViewMode === 'SOLO' ? <ToggleRight className="w-4 h-4" /> : <ToggleLeft className="w-4 h-4" />}
-                                        {teamViewMode === 'ALL' ? 'Filter: Solo Only' : 'Show All'}
-                                    </button>
+                                <div className="flex items-center gap-3">
+                                    <div className="flex bg-white/5 p-1 rounded-xl border border-white/10 mr-2">
+                                        <button
+                                            onClick={() => setViewMode('VISUAL')}
+                                            className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${viewMode === 'VISUAL' ? 'bg-orange-500 text-black' : 'text-white/40 hover:text-white'}`}
+                                        >
+                                            Cards
+                                        </button>
+                                        <button
+                                            onClick={() => setViewMode('GRID')}
+                                            className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${viewMode === 'GRID' ? 'bg-orange-500 text-black' : 'text-white/40 hover:text-white'}`}
+                                        >
+                                            Grid
+                                        </button>
+                                    </div>
                                     <button onClick={handleUniversalExport} className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-green-500 to-emerald-600 text-white font-black rounded-lg hover:opacity-90 transition-all text-[10px] uppercase tracking-widest shadow-[0_0_15px_rgba(34,197,94,0.3)]">
-                                        <Download className="w-3 h-3" /> Download Unified Roster
+                                        <Download className="w-3 h-3" /> Unified Roster
                                     </button>
                                 </div>
                             </div>
 
-                            <div className="grid grid-cols-1 gap-4">
-                                {teamViewMode === 'ALL' ? (
-                                    data.teams.map((team: any) => (
+                            {viewMode === 'VISUAL' ? (
+                                <div className="grid grid-cols-1 gap-4">
+                                    {data.teams.map((team: any) => (
                                         <SquadRow
                                             key={team.id}
                                             team={team}
-                                            members={data.users.filter((u: any) => u.team_id === team.id)}
+                                            members={team.members}
                                             onRecruit={(slotId: number) => setRecruitState({ teamId: team.id, slotId })}
                                             onKick={handleMoveMember}
                                             onEdit={(field: string, val: any) => handleEditTeam(team.id, field, val)}
                                             onViewMember={(m: any) => setViewMember(m)}
                                             onDelete={handleDeleteTeam}
+                                            isVirtual={team.isVirtual}
                                         />
-                                    ))
-                                ) : (
-                                    data.users.filter((u: any) => !u.team_id).map((solo: any) => (
-                                        <SquadRow
-                                            key={solo.id}
-                                            team={{
-                                                id: `SOLO-${solo.id}`,
-                                                name: `${solo.name}'s Party`,
-                                                unique_code: 'SOLO',
-                                                isVirtual: true,
-                                                payment_mode: 'INDIVIDUAL'
-                                            }}
-                                            members={[solo]}
-                                            onRecruit={(slotId: number) => setRecruitState({ teamId: `SOLO_CONVERT:${solo.id}`, slotId })}
-                                            onKick={() => { }}
-                                            onViewMember={(m: any) => setViewMember(m)}
-                                            isVirtual
-                                        />
-                                    ))
-                                )}
-                            </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="bg-white/[0.02] border border-white/10 rounded-2xl overflow-hidden backdrop-blur-md">
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full text-left border-collapse min-w-[1000px]">
+                                            <thead className="bg-white/5">
+                                                <tr className="border-b border-white/10">
+                                                    <th className="p-4 text-[10px] uppercase tracking-widest text-white/40">Team Identification</th>
+                                                    <th className="p-4 text-[10px] uppercase tracking-widest text-white/40">Squad Code</th>
+                                                    <th className="p-4 text-[10px] uppercase tracking-widest text-white/40">Type</th>
+                                                    <th className="p-4 text-[10px] uppercase tracking-widest text-white/40">Warriors</th>
+                                                    <th className="p-4 text-[10px] uppercase tracking-widest text-white/40">Payment Mode</th>
+                                                    <th className="p-4 text-[10px] uppercase tracking-widest text-white/40 text-right">Direct Commands</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-white/5">
+                                                {data.teams.map((team: any) => (
+                                                    <tr key={team.id} className="group hover:bg-white/[0.02] transition-colors">
+                                                        <td className="p-4">
+                                                            <div className="flex items-center gap-3">
+                                                                <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-black text-[10px] ${team.isVirtual ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20' : 'bg-gradient-to-br from-orange-500 to-red-600 text-white ring-2 ring-white/10'}`}>
+                                                                    {team.name[0]}
+                                                                </div>
+                                                                <div>
+                                                                    {editingId === team.id && editField === 'name' ? (
+                                                                        <input
+                                                                            autoFocus
+                                                                            value={editValue}
+                                                                            onChange={(e) => setEditValue(e.target.value)}
+                                                                            onBlur={() => handleEditTeam(team.id, 'name', editValue)}
+                                                                            onKeyDown={(e) => e.key === 'Enter' && handleEditTeam(team.id, 'name', editValue)}
+                                                                            className="bg-black/50 border border-orange-500/50 rounded px-2 py-1 w-full outline-none text-xs font-black uppercase"
+                                                                        />
+                                                                    ) : (
+                                                                        <div onDoubleClick={() => { if (!team.isVirtual) { setEditingId(team.id); setEditField('name'); setEditValue(team.name); } }} className={`text-sm font-black uppercase ${!team.isVirtual ? 'cursor-pointer hover:text-orange-400' : ''}`}>
+                                                                            {team.name}
+                                                                        </div>
+                                                                    )}
+                                                                    <div className="text-[9px] text-white/20 font-mono italic">ID: {team.id}</div>
+                                                                </div>
+                                                            </div>
+                                                        </td>
+                                                        <td className="p-4">
+                                                            {editingId === team.id && editField === 'unique_code' ? (
+                                                                <input
+                                                                    autoFocus
+                                                                    value={editValue}
+                                                                    onChange={(e) => setEditValue(e.target.value)}
+                                                                    onBlur={() => handleEditTeam(team.id, 'unique_code', editValue)}
+                                                                    onKeyDown={(e) => e.key === 'Enter' && handleEditTeam(team.id, 'unique_code', editValue)}
+                                                                    className="bg-black/50 border border-orange-500/50 rounded px-2 py-1 w-24 outline-none font-mono text-xs text-orange-400"
+                                                                />
+                                                            ) : (
+                                                                <span onDoubleClick={() => { if (!team.isVirtual) { setEditingId(team.id); setEditField('unique_code'); setEditValue(team.unique_code); } }} className={`font-mono text-xs text-orange-400 bg-orange-400/5 px-2 py-1 rounded border border-orange-400/10 ${!team.isVirtual ? 'cursor-pointer hover:border-orange-400' : ''}`}>
+                                                                    {team.unique_code}
+                                                                </span>
+                                                            )}
+                                                        </td>
+                                                        <td className="p-4">
+                                                            <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full ${team.isVirtual ? 'bg-white/5 text-white/40' : 'bg-purple-500/10 text-purple-400'}`}>
+                                                                {team.isVirtual ? 'SOLO' : 'SQUAD'}
+                                                            </span>
+                                                        </td>
+                                                        <td className="p-4">
+                                                            <div className="flex -space-x-2">
+                                                                {team.members.map((m: any, idx: number) => (
+                                                                    <div key={m.id} className="w-6 h-6 rounded-full bg-neutral-800 border-2 border-neutral-900 flex items-center justify-center text-[8px] font-bold text-white/40" title={m.name}>
+                                                                        {m.name[0]}
+                                                                    </div>
+                                                                ))}
+                                                                {Array.from({ length: Math.max(0, (team.max_members || 5) - team.memberCount) }).map((_, i) => (
+                                                                    <div key={i} className="w-6 h-6 rounded-full bg-white/5 border-2 border-neutral-900 flex items-center justify-center text-[10px] text-white/10">
+                                                                        +
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                            <div className="mt-1 text-[9px] font-bold text-white/30 uppercase tracking-tighter">{team.memberCount} / {team.max_members || 5} Warriors</div>
+                                                        </td>
+                                                        <td className="p-4">
+                                                            <StatusBadge status={team.payment_mode} />
+                                                        </td>
+                                                        <td className="p-4 text-right">
+                                                            <div className="flex items-center justify-end gap-2">
+                                                                <button
+                                                                    onClick={() => {
+                                                                        if (team.isVirtual) {
+                                                                            setViewMember(team.members[0]);
+                                                                        } else {
+                                                                            setShowModal('TEAM_DETAILS');
+                                                                            setEditingId(team.id);
+                                                                            setEditField('TEAM_MEMBERS');
+                                                                        }
+                                                                    }}
+                                                                    className="px-3 py-1.5 bg-white/5 border border-white/10 rounded-lg text-[9px] font-black uppercase tracking-widest hover:bg-white/10 hover:text-white transition-all shadow-sm"
+                                                                >
+                                                                    Reveal All
+                                                                </button>
+                                                                {!team.isVirtual && (
+                                                                    <button
+                                                                        onClick={() => { if (confirm('Are you sure you want to DISBAND this squad? Members will be released as solo units.')) handleDeleteTeam(team.id); }}
+                                                                        className="p-2 text-red-500/40 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"
+                                                                    >
+                                                                        <Trash2 className="w-4 h-4" />
+                                                                    </button>
+                                                                )}
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            )}
 
                             {teamViewMode === 'ALL' && data.teams.length === 0 && (
                                 <div className="py-20 text-center border-2 border-dashed border-white/5 rounded-3xl">
@@ -1373,7 +1492,9 @@ export default function MainDashboard() {
                         animate={{ scale: 1, opacity: 1 }}
                         className="bg-white/10 border border-white/20 rounded-3xl p-8 max-w-md w-full shadow-2xl"
                     >
-                        <h3 className="text-xl font-bold mb-6">Add {showModal}</h3>
+                        <h3 className="text-xl font-bold mb-6">
+                            {showModal === 'TEAM_DETAILS' ? 'SQUAD INTEL' : `Add ${showModal}`}
+                        </h3>
                         <form onSubmit={handleAdd} className="space-y-4">
                             {showModal === 'ADMINS' && (
                                 <>
@@ -1454,30 +1575,51 @@ export default function MainDashboard() {
 
                             {editField === 'TEAM_MEMBERS' && (
                                 <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
+                                    <div className="mb-4">
+                                        <div className="text-[10px] text-white/20 uppercase font-black tracking-widest mb-1">Squad ID Reference</div>
+                                        <div className="text-xs font-mono text-orange-400 bg-orange-400/5 px-2 py-1 rounded border border-orange-400/10 inline-block">{editingId}</div>
+                                    </div>
                                     {data.users.filter((u: any) => u.team_id === editingId).map((u: any) => (
-                                        <div key={u.id} className="flex items-center justify-between p-4 bg-white/5 border border-white/10 rounded-2xl group">
+                                        <div key={u.id} className="flex items-center justify-between p-4 bg-white/5 border border-white/10 rounded-2xl group hover:border-cyan-500/30 transition-all">
                                             <div className="flex items-center gap-4">
-                                                <div className="w-10 h-10 rounded-full bg-cyan-500/10 flex items-center justify-center font-black text-xs text-cyan-400 border border-cyan-500/20">{u.name[0]}</div>
+                                                <div className="w-10 h-10 rounded-full bg-cyan-500/10 flex items-center justify-center font-black text-xs text-cyan-400 border border-cyan-500/20 shadow-[0_0_10px_rgba(6,182,212,0.1)]">{u.name[0]}</div>
                                                 <div>
-                                                    <div className="font-black text-sm uppercase">{u.name}</div>
-                                                    <div className="text-[10px] text-white/40 tracking-wider">{u.reg_no} • {u.role}</div>
+                                                    <div className="font-black text-sm uppercase text-white group-hover:text-cyan-400 transition-colors">{u.name}</div>
+                                                    <div className="text-[10px] text-white/40 tracking-wider font-mono">{u.reg_no} • {u.role || 'Member'}</div>
+                                                    <div className="text-[9px] text-white/20 mt-1 uppercase font-bold">{u.email}</div>
                                                 </div>
                                             </div>
-                                            <StatusBadge status={u.status} />
+                                            <div className="flex flex-col items-end gap-2">
+                                                <StatusBadge status={u.status} />
+                                                <div className="flex gap-2">
+                                                    <button onClick={() => { setViewMember(u); }} className="text-[8px] font-black text-orange-500 hover:text-orange-400 uppercase tracking-tighter">Bio</button>
+                                                    <div className="w-[1px] h-2 bg-white/10" />
+                                                    <button onClick={() => { if (confirm(`Remove ${u.name} from this squad?`)) handleMoveMember(u.id, ""); }} className="text-[8px] font-black text-red-500 hover:text-red-400 uppercase tracking-tighter">Kick</button>
+                                                </div>
+                                            </div>
                                         </div>
                                     ))}
                                     {data.users.filter((u: any) => u.team_id === editingId).length === 0 && (
-                                        <div className="text-center py-12 text-white/20 uppercase font-black tracking-widest text-[10px]">No deployed members found</div>
+                                        <div className="text-center py-12 border-2 border-dashed border-white/5 rounded-3xl">
+                                            <ShieldAlert className="w-8 h-8 text-white/10 mx-auto mb-2" />
+                                            <p className="text-white/20 uppercase font-black tracking-widest text-[10px]">No active units in sector</p>
+                                        </div>
                                     )}
                                 </div>
                             )}
 
-                            <div className="flex gap-4 mt-8">
-                                <button type="button" onClick={() => setShowModal(null)} className="flex-1 py-3 bg-white/5 rounded-xl font-bold hover:bg-white/10 transition-all">Cancel</button>
-                                <button type="submit" disabled={loading} className="flex-1 py-3 bg-gradient-to-r from-orange-500 to-red-600 rounded-xl font-bold hover:opacity-90 transition-all flex items-center justify-center gap-2">
-                                    {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Confirm Add'}
-                                </button>
-                            </div>
+                            {editField !== 'TEAM_MEMBERS' && (
+                                <div className="flex gap-4 mt-8">
+                                    <button type="button" onClick={() => setShowModal(null)} className="flex-1 py-3 bg-white/5 rounded-xl font-bold hover:bg-white/10 transition-all">Cancel</button>
+                                    <button type="submit" disabled={loading} className="flex-1 py-3 bg-gradient-to-r from-orange-500 to-red-600 rounded-xl font-bold hover:opacity-90 transition-all flex items-center justify-center gap-2">
+                                        {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Confirm Add'}
+                                    </button>
+                                </div>
+                            )}
+
+                            {editField === 'TEAM_MEMBERS' && (
+                                <button type="button" onClick={() => setShowModal(null)} className="w-full mt-6 py-3 bg-white/10 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-white/20 transition-all border border-white/10">Close Intel Report</button>
+                            )}
                         </form>
                     </motion.div>
                 </div>
