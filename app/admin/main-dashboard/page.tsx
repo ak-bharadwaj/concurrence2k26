@@ -73,6 +73,7 @@ export default function MainDashboard() {
     // Squad Command Center State
     const [teamViewMode, setTeamViewMode] = useState<'ALL' | 'SOLO'>('ALL');
     const [recruitState, setRecruitState] = useState<{ teamId: string, slotId: number } | null>(null);
+    const [lastSynced, setLastSynced] = useState<Date | null>(null);
 
     useEffect(() => {
         const session = getAdminSession();
@@ -258,15 +259,7 @@ export default function MainDashboard() {
     const fetchAllData = async () => {
         try {
             setLoading(true);
-            const [
-                { data: users },
-                { data: admins },
-                { data: qr },
-                { data: emails },
-                { data: groups },
-                { data: logs },
-                { data: teams }
-            ] = await Promise.all([
+            const results = await Promise.all([
                 supabase.from("users").select("*").order("created_at", { ascending: false }),
                 supabase.from("admins").select("*").order("created_at", { ascending: false }),
                 supabase.from("qr_codes").select("*").order("created_at", { ascending: false }),
@@ -276,19 +269,31 @@ export default function MainDashboard() {
                 supabase.from("teams").select("*, users(count)")
             ]);
 
-            setData({
-                users: (users || []).sort((a: any, b: any) => {
-                    const priorityStatus = ["VERIFYING", "PENDING"];
-                    const aPriority = priorityStatus.indexOf(a.status);
-                    const bPriority = priorityStatus.indexOf(b.status);
+            // Robust individual error checks
+            const errors = results.filter(r => r.error).map(r => r.error?.message);
+            if (errors.length > 0) {
+                console.error("Supabase Fetch Errors:", errors);
+                // We show alert but still try to render what we got
+                alert("Some data failed to sync: \n" + errors.join("\n"));
+            }
 
-                    if (aPriority !== bPriority) {
-                        if (aPriority === -1) return 1;
-                        if (bPriority === -1) return -1;
-                        return aPriority - bPriority;
-                    }
-                    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-                }),
+            const [users, admins, qr, emails, groups, logs, teams] = results.map(r => r.data);
+
+            const processedUsers = (users || []).sort((a: any, b: any) => {
+                const priorityStatus = ["VERIFYING", "PENDING"];
+                const aPriority = priorityStatus.indexOf(a.status);
+                const bPriority = priorityStatus.indexOf(b.status);
+
+                if (aPriority !== bPriority) {
+                    if (aPriority === -1) return 1;
+                    if (bPriority === -1) return -1;
+                    return aPriority - bPriority;
+                }
+                return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+            });
+
+            setData({
+                users: processedUsers,
                 admins: admins || [],
                 qr: qr || [],
                 emails: emails || [],
@@ -299,9 +304,10 @@ export default function MainDashboard() {
                     memberCount: (users || []).filter((u: any) => u.team_id === t.id).length
                 }))
             });
+            setLastSynced(new Date());
         } catch (err: any) {
-            console.error("Fetch Data Error:", err);
-            alert("Error loading data: " + err.message);
+            console.error("Fetch Data Critical Error:", err);
+            alert("Critical Error loading data: " + err.message);
         } finally {
             setLoading(false);
         }
@@ -843,7 +849,14 @@ export default function MainDashboard() {
                         <button onClick={() => setMobileMenuOpen(true)} className="lg:hidden text-white/60 hover:text-white">
                             <Menu className="w-6 h-6" />
                         </button>
-                        <h2 className="text-sm sm:text-xl font-bold truncate max-w-[150px] sm:max-w-none">{activeTab.replace('_', ' ')} Management</h2>
+                        <div>
+                            <h2 className="text-sm sm:text-xl font-bold truncate max-w-[150px] sm:max-w-none">{activeTab.replace('_', ' ')} Management</h2>
+                            {lastSynced && (
+                                <p className="text-[10px] text-white/20 font-mono uppercase tracking-widest hidden sm:block">
+                                    Last Sync: {lastSynced.toLocaleTimeString()}
+                                </p>
+                            )}
+                        </div>
                         {activeTab === 'USERS' && (
                             <div className="flex items-center gap-3">
                                 <div className="relative">
