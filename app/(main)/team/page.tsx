@@ -101,7 +101,7 @@ export default function TeamPage() {
         if (debounceTimer) clearTimeout(debounceTimer);
         const timeout = setTimeout(() => {
             fetchTeamData(silent);
-        }, 10);
+        }, 1000);
         setDebounceTimer(timeout);
     }, [debounceTimer, fetchTeamData]);
 

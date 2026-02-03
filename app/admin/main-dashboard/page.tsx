@@ -41,9 +41,11 @@ import { getAdminSession, adminLogout } from "@/lib/auth";
 import { updateStatus, getActiveGroupLink, deleteUser, resetQRUsage, markAttendance, fetchAttendanceReport, sendCustomUserEmail, approveTeamPayment, createTeam, deleteTeam } from "@/lib/supabase-actions";
 import { getFriendlyError } from "@/lib/error-handler";
 import Image from "next/image";
-import { MemberDetailModal } from "./MemberDetailModal";
-import { VerificationGroupModal } from "./VerificationGroupModal";
-import { TeamPaymentModal } from "./TeamPaymentModal";
+import dynamic from "next/dynamic";
+
+const MemberDetailModal = dynamic(() => import("./MemberDetailModal").then(mod => mod.MemberDetailModal), { ssr: false });
+const VerificationGroupModal = dynamic(() => import("./VerificationGroupModal").then(mod => mod.VerificationGroupModal), { ssr: false });
+const TeamPaymentModal = dynamic(() => import("./TeamPaymentModal").then(mod => mod.TeamPaymentModal), { ssr: false });
 
 
 type Tab = "USERS" | "VERIFY_QUEUE" | "ADMINS" | "QR" | "EMAILS" | "GROUPS" | "LOGS" | "TEAMS" | "SCAN" | "TEAM_DETAILS";
@@ -95,8 +97,15 @@ export default function MainDashboard() {
     const [recentScans, setRecentScans] = useState<any[]>([]);
     const [emailModal, setEmailModal] = useState<{ userId: string, name: string } | null>(null);
     const [verificationGroup, setVerificationGroup] = useState<any>(null);
-    const [emailSubject, setEmailSubject] = useState("");
     const [emailMessage, setEmailMessage] = useState("");
+    const fetchTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
+
+    const debouncedFetch = (silent = false) => {
+        if (fetchTimeoutRef.current) clearTimeout(fetchTimeoutRef.current);
+        fetchTimeoutRef.current = setTimeout(() => {
+            fetchAllData(silent);
+        }, 1000); // 1s debounce for stability
+    };
 
     useEffect(() => {
         const session = getAdminSession();
@@ -111,17 +120,16 @@ export default function MainDashboard() {
         const channel = supabase
             .channel('dashboard-changes')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, () => {
-                // Always fetch full data to ensures derived states (like squads) are correctly recalculated
-                fetchAllData(true);
+                debouncedFetch(true);
             })
             .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, () => {
-                fetchAllData(true);
+                debouncedFetch(true);
             })
             .on('postgres_changes', { event: '*', schema: 'public', table: 'teams' }, () => {
-                fetchAllData(true);
+                debouncedFetch(true);
             })
             .on('postgres_changes', { event: '*', schema: 'public', table: 'join_requests' }, () => {
-                fetchAllData(true);
+                debouncedFetch(true);
             })
             .on('postgres_changes', { event: '*', schema: 'public', table: 'qr_codes' }, (payload: any) => {
                 if (payload.eventType === 'UPDATE') {
@@ -130,17 +138,17 @@ export default function MainDashboard() {
                         qr: prev.qr.map((q: any) => q.id === payload.new.id ? { ...q, ...payload.new } : q)
                     }));
                 } else {
-                    fetchAllData(true);
+                    debouncedFetch(true);
                 }
             })
             .on('postgres_changes', { event: '*', schema: 'public', table: 'admins' }, () => {
-                fetchAllData(true);
+                debouncedFetch(true);
             })
             .on('postgres_changes', { event: '*', schema: 'public', table: 'email_accounts' }, () => {
-                fetchAllData(true);
+                debouncedFetch(true);
             })
             .on('postgres_changes', { event: '*', schema: 'public', table: 'group_links' }, () => {
-                fetchAllData(true);
+                debouncedFetch(true);
             })
             .subscribe();
 
@@ -242,7 +250,7 @@ export default function MainDashboard() {
                     return publicUrl;
                 };
 
-                if (formData.bulk) {
+                if (formData.bulk !== false) {
                     const amounts = [800, 1600, 2400, 3200, 4000];
                     const qrSets = [];
 
