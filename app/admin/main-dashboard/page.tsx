@@ -283,12 +283,10 @@ export default function MainDashboard() {
                         amount: formData.amount || 800,
                         daily_limit: formData.daily_limit || 100
                     };
-                }
-
-                if (!formData.bulk) {
                     const { error } = await supabase.from(table).insert([dataToInsert]);
                     if (error) throw error;
                 }
+
 
                 setShowModal(null);
                 setFormData({});
