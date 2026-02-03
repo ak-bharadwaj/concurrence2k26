@@ -47,7 +47,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import { getFriendlyError } from "@/lib/error-handler";
 
-type Step = 0 | 1 | 2 | 3 | 4 | 5;
+type Step = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 
 const GlassNavbar = () => (
     <nav className="fixed top-0 left-0 right-0 z-50 px-4 py-4">
@@ -136,6 +136,7 @@ function RegisterPageContent() {
                     router.push("/success");
                 } else if (payload.new.status === 'REJECTED') {
                     setError("Payment rejected. Please check your transaction ID.");
+                    if (step > 4) setStep(5); // Bring them back to review if they were at payment
                 }
             })
             .subscribe();
@@ -149,10 +150,10 @@ function RegisterPageContent() {
                 table: 'users',
                 filter: `id=eq.${userId}`
             }, (payload) => {
-                if (payload.new.team_id && !teamDetails) {
+                if (payload.new.team_id && !teamDetails && regMode === 'SQUAD') {
                     getTeamDetails(payload.new.team_id).then(setTeamDetails);
                     if (payload.new.role) setUserRole(payload.new.role);
-                    setStep(4);
+                    if (step < 4) setStep(4);
                 }
             })
             .subscribe();
@@ -317,14 +318,34 @@ function RegisterPageContent() {
         try {
             setLoading(true);
             const currentTotal = ((teamDetails?.members?.length || 1) + additionalMembers.length) * 800;
+            // DEFERRED WRITE: Don't save yet, just move to review
+            // if (additionalMembers.length > 0) {
+            //     await registerBulkMembers(userId!, teamDetails.id, additionalMembers);
+            //     setAdditionalMembers([]);
+            // }
+            setFinalAmount(currentTotal);
+            // Move to Review Step instead of Payment
+            setStep(5);
+        } catch (err: any) { setError(getFriendlyError(err)); } finally { setLoading(false); }
+    };
+
+    const handleProceedToPayment = async () => {
+        try {
+            setLoading(true);
+
+            // EXECUTE DEFERRED WRITE
             if (additionalMembers.length > 0) {
                 await registerBulkMembers(userId!, teamDetails.id, additionalMembers);
+                // We keep additionalMembers in state until payment is done or just let them stay?
+                // Better to clear them so if they go back they don't see duplicates?
+                // No, if we clear them, we can't show them in Review if they come back from payment step.
+                // But we just wrote them to DB. If we come back, they should be in teamDetails.members via realtime subscription.
                 setAdditionalMembers([]);
             }
-            setFinalAmount(currentTotal);
-            const qr = await getNextAvailableQR(currentTotal);
+
+            const qr = await getNextAvailableQR(finalAmount || 800);
             setAssignedQR(qr);
-            setStep(5);
+            setStep(6);
         } catch (err: any) { setError(getFriendlyError(err)); } finally { setLoading(false); }
     };
 
@@ -345,9 +366,12 @@ function RegisterPageContent() {
         else if (step === 3) setStep(2);
         else if (step === 4) setStep(3);
         else if (step === 5) {
-            if (regMode === "SOLO") setStep(2);
-            else setStep(4);
+            // Smart Back: Go back to where they actually came from / where inputs are
+            if (regMode === "SOLO") setStep(1); // SOLO skips 4,3 and Step 2 is just text. Go to 1 to edit identity.
+            else if (squadSubMode === "JOIN") setStep(3); // JOINER wants to edit identity
+            else setStep(4); // FORMER leader might want to add/remove members in Hub
         }
+        else if (step === 6) setStep(5);
     };
 
     const handlePaymentSubmit = async () => {
@@ -385,7 +409,7 @@ function RegisterPageContent() {
                         </button>
                     )}
                     <div className="flex gap-2 flex-1">
-                        {[0, 1, 2, 3, 4, 5].map((s) => (
+                        {[0, 1, 2, 3, 4, 5, 6].map((s) => (
                             <div key={s} className={`h-1 flex-1 rounded-full transition-all duration-500 ${step >= s ? 'bg-cyan-500 shadow-[0_0_10px_rgba(6,182,212,0.5)]' : 'bg-white/10'}`} />
                         ))}
                     </div>
@@ -422,14 +446,14 @@ function RegisterPageContent() {
                                         <FormInput label="Phone" icon={Phone} value={formData.phone} onChange={(v: string) => setFormData({ ...formData, phone: v })} placeholder="9988..." />
                                         <div className="grid grid-cols-2 gap-3">
                                             <div className="space-y-1.5 flex flex-col">
-                                                <label className="text-[10px] uppercase font-black text-white/30 tracking-widest pl-1">College</label>
+                                                <label className="text-[10px] uppercase font-black text-white/50 tracking-widest pl-1">College</label>
                                                 <select value={formData.college} onChange={(e) => setFormData({ ...formData, college: e.target.value })} className="bg-white/5 border border-white/10 rounded-2xl py-3.5 px-4 outline-none focus:border-cyan-500/50 transition-all font-medium text-white text-sm">
                                                     <option value="RGM" className="bg-neutral-900">RGM</option>
                                                     <option value="OTHERS" className="bg-neutral-900">Others</option>
                                                 </select>
                                             </div>
                                             <div className="space-y-1.5 flex flex-col">
-                                                <label className="text-[10px] uppercase font-black text-white/30 tracking-widest pl-1">Year</label>
+                                                <label className="text-[10px] uppercase font-black text-white/50 tracking-widest pl-1">Year</label>
                                                 <select value={formData.year} onChange={(e) => setFormData({ ...formData, year: e.target.value })} className="bg-white/5 border border-white/10 rounded-2xl py-3.5 px-4 outline-none focus:border-cyan-500/50 transition-all font-medium text-white text-sm">
                                                     <option value="" className="bg-neutral-900">-</option>
                                                     {["I", "II", "III", "IV"].map(y => <option key={y} value={y} className="bg-neutral-900">{y}</option>)}
@@ -440,13 +464,13 @@ function RegisterPageContent() {
                                             <FormInput label="College Name" icon={ExternalLink} value={formData.otherCollege} onChange={(v: string) => setFormData({ ...formData, otherCollege: v })} placeholder="Your College" />
                                         )}
                                         <div className="space-y-1.5 flex flex-col">
-                                            <label className="text-[10px] uppercase font-black text-white/30 tracking-widest pl-1">Shirt Size</label>
+                                            <label className="text-[10px] uppercase font-black text-white/50 tracking-widest pl-1">Shirt Size</label>
                                             <select value={formData.tshirtSize} onChange={(e) => setFormData({ ...formData, tshirtSize: e.target.value })} className="bg-white/5 border border-white/10 rounded-2xl py-3.5 px-4 outline-none focus:border-cyan-500/50 transition-all font-medium text-white text-sm">
                                                 {["XS", "S", "M", "L", "XL", "XXL"].map(s => <option key={s} value={s} className="bg-neutral-900">{s}</option>)}
                                             </select>
                                         </div>
                                         <div className="space-y-1.5 flex flex-col">
-                                            <label className="text-[10px] uppercase font-black text-white/30 tracking-widest pl-1">Branch</label>
+                                            <label className="text-[10px] uppercase font-black text-white/50 tracking-widest pl-1">Branch</label>
                                             <select value={formData.branch} onChange={(e) => setFormData({ ...formData, branch: e.target.value })} className="bg-white/5 border border-white/10 rounded-2xl py-3.5 px-4 outline-none focus:border-cyan-500/50 transition-all font-medium text-white text-sm">
                                                 <option value="" className="bg-neutral-900">Select Branch</option>
                                                 {["CSE", "CSE-AIML", "CSE-DS", "CSE-BS", "EEE", "ECE", "MECH", "CIVIL", "OTHERS"].map(b => (
@@ -482,8 +506,6 @@ function RegisterPageContent() {
                                             try {
                                                 setLoading(true);
                                                 setFinalAmount(800);
-                                                const qr = await getNextAvailableQR(800);
-                                                setAssignedQR(qr);
                                                 setStep(5);
                                             } catch (err: any) {
                                                 setError(getFriendlyError(err));
@@ -659,8 +681,6 @@ function RegisterPageContent() {
                                                             try {
                                                                 setLoading(true);
                                                                 setFinalAmount(800);
-                                                                const qr = await getNextAvailableQR(800);
-                                                                setAssignedQR(qr);
                                                                 setStep(5);
                                                             } catch (err: any) {
                                                                 setError(getFriendlyError(err));
@@ -689,7 +709,66 @@ function RegisterPageContent() {
                     )}
 
                     {step === 5 && (
-                        <motion.div key="s5" className="glass-card p-6 sm:p-8 rounded-3xl space-y-8">
+                        <motion.div key="s5" className="glass-card p-6 sm:p-8 rounded-3xl space-y-6">
+                            <Header title="Review Details" subtitle="Confirm your engagement" />
+
+                            <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+                                <div className="space-y-2">
+                                    <p className="text-[10px] uppercase font-black text-cyan-400 tracking-widest pl-1">Primary Warrior</p>
+                                    <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-3">
+                                        <ReviewRow label="Name" value={formData.name} />
+                                        <ReviewRow label="Reg No" value={formData.reg_no} />
+                                        <ReviewRow label="Email" value={formData.email} />
+                                        <ReviewRow label="Phone" value={formData.phone} />
+                                        <ReviewRow label="College" value={formData.college === "RGM" ? "RGM College" : formData.otherCollege} />
+                                        <ReviewRow label="Branch" value={formData.branch} />
+                                        <ReviewRow label="Year" value={formData.year} />
+                                        <ReviewRow label="T-Shirt" value={formData.tshirtSize} />
+                                    </div>
+                                </div>
+
+                                {regMode === "SQUAD" && additionalMembers.length > 0 && (
+                                    <div className="space-y-4 pt-4 border-t border-white/5">
+                                        <p className="text-[10px] uppercase font-black text-purple-400 tracking-widest pl-1">Squad Members ({additionalMembers.length})</p>
+                                        <div className="grid grid-cols-1 gap-4">
+                                            {additionalMembers.map((m, i) => (
+                                                <div key={i} className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-3">
+                                                    <div className="flex justify-between items-center mb-2 border-b border-white/5 pb-2">
+                                                        <span className="text-xs font-black text-white/60">MEMBER {i + 1}</span>
+                                                    </div>
+                                                    <ReviewRow label="Name" value={m.name} />
+                                                    <ReviewRow label="Reg No" value={m.reg_no} />
+                                                    <ReviewRow label="Email" value={m.email} />
+                                                    <ReviewRow label="Phone" value={m.phone} />
+                                                    <ReviewRow label="College" value={m.college === "RGM" ? "RGM College" : m.otherCollege} />
+                                                    <ReviewRow label="Branch" value={m.branch} />
+                                                    <ReviewRow label="Year" value={m.year} />
+                                                    <ReviewRow label="T-Shirt" value={m.tshirtSize} />
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-xl flex gap-3">
+                                <AlertCircle className="w-5 h-5 text-yellow-500 shrink-0" />
+                                <p className="text-[10px] text-yellow-200/60 leading-relaxed uppercase font-bold">
+                                    Please ensure all details are correct. You won't be able to edit these once payment is submitted.
+                                </p>
+                            </div>
+
+                            <div className="flex gap-3">
+                                <button onClick={handleBack} className="flex-1 py-4 bg-white/5 border border-white/10 text-white font-bold rounded-xl active:scale-95 transition-all">EDIT</button>
+                                <button onClick={handleProceedToPayment} disabled={loading} className="flex-[2] py-4 bg-cyan-500 text-black font-black rounded-xl active:scale-95 transition-all shadow-lg flex items-center justify-center gap-2">
+                                    {loading ? <Loader2 className="animate-spin" /> : <>CONFIRM & PAY <ChevronRight className="w-4 h-4" /></>}
+                                </button>
+                            </div>
+                        </motion.div>
+                    )}
+
+                    {step === 6 && (
+                        <motion.div key="s6" className="glass-card p-6 sm:p-8 rounded-3xl space-y-8">
                             <Header title="Secure Payment" subtitle="Synchronize transmission" />
                             <div className="text-center bg-black/40 p-6 rounded-2xl border border-white/10 relative overflow-hidden min-h-[300px] flex flex-col items-center justify-center">
                                 {loading || !assignedQR ? (
@@ -700,7 +779,7 @@ function RegisterPageContent() {
                                 ) : (
                                     <>
                                         <p className="text-[10px] text-white/40 uppercase tracking-widest mb-1 font-bold">Payable amount</p>
-                                        <p className="text-4xl sm:text-5xl font-black text-white tracking-tighter">₹{finalAmount || totalAmount}</p>
+                                        <p className="text-4xl sm:text-5xl font-black text-white tracking-tighter">₹{finalAmount}</p>
                                         <div className="bg-white p-3 rounded-2xl w-40 h-40 sm:w-48 sm:h-48 mx-auto my-6 shadow-[0_0_40px_rgba(255,255,255,0.1)]">
                                             <Image src={assignedQR?.qr_image_url || "https://placehold.co/400x400/png?text=DEFAULT+QR"} alt="Pay" width={200} height={200} className="w-full h-full object-contain" />
                                         </div>
@@ -715,10 +794,16 @@ function RegisterPageContent() {
                             </div>
 
                             <div className="space-y-4">
-                                <FormInput label="Transaction ID (UTR)" icon={Hash} value={paymentProof.transaction_id} onChange={(v: string) => setPaymentProof({ ...paymentProof, transaction_id: v })} placeholder="12 digit number" />
+                                <FormInput
+                                    label="Transaction ID (UTR) *"
+                                    icon={Hash}
+                                    value={paymentProof.transaction_id}
+                                    onChange={(v: string) => setPaymentProof({ ...paymentProof, transaction_id: v })}
+                                    placeholder="12 digit number"
+                                />
                                 <div className="space-y-2">
-                                    <label className="text-[10px] uppercase font-black text-white/30 tracking-widest pl-1">Proof of Payment</label>
-                                    <label className="h-28 border-2 border-dashed border-white/10 rounded-2xl flex flex-col items-center justify-center cursor-pointer hover:border-cyan-500/50 hover:bg-white/5 transition-all text-white/40 p-4">
+                                    <label className="text-[10px] uppercase font-black text-white/30 tracking-widest pl-1">Proof of Payment *</label>
+                                    <label className={`h-28 border-2 border-dashed rounded-2xl flex flex-col items-center justify-center cursor-pointer hover:bg-white/5 transition-all p-4 ${paymentProof.screenshot ? 'border-green-500/50 bg-green-500/5' : 'border-white/10 text-white/40'}`}>
                                         {paymentProof.screenshot ? (
                                             <div className="flex items-center gap-2 text-green-400 font-bold text-center break-all text-xs">
                                                 <CheckCircle2 className="w-5 h-5 shrink-0" /> {paymentProof.screenshot.name}
@@ -744,11 +829,15 @@ function RegisterPageContent() {
                                     />
                                 </div>
                                 <span className="text-[10px] text-white/40 leading-relaxed group-hover:text-white/60 transition-colors">
-                                    I agree to the <a href="/terms" target="_blank" className="text-cyan-400 font-bold hover:underline">Terms & Conditions</a> and <a href="/faq" target="_blank" className="text-purple-400 font-bold hover:underline">Privacy Policy</a> of Hackathon 2K26. I understand that registration fee is non-refundable.
+                                    I agree to the <a href="/terms" target="_blank" className="text-cyan-400 font-bold hover:underline">Terms & Conditions</a> and <a href="/faq" target="_blank" className="text-purple-400 font-bold hover:underline">Privacy Policy</a> of Hackathon 2K26. I understand that registration fee is non-refundable. *
                                 </span>
                             </label>
 
-                            <button onClick={handlePaymentSubmit} disabled={loading} className="w-full py-4 bg-gradient-to-r from-cyan-600 to-purple-600 rounded-xl font-black text-sm tracking-widest uppercase shadow-xl active:scale-95 transition-all flex items-center justify-center gap-3">
+                            <button
+                                onClick={handlePaymentSubmit}
+                                disabled={loading || !paymentProof.transaction_id || !paymentProof.screenshot || !acceptedTerms}
+                                className="w-full py-4 bg-gradient-to-r from-cyan-600 to-purple-600 rounded-xl font-black text-sm tracking-widest uppercase shadow-xl active:scale-95 transition-all flex items-center justify-center gap-3 disabled:opacity-50 disabled:grayscale disabled:cursor-not-allowed"
+                            >
                                 {loading ? <Loader2 className="animate-spin" /> : <>Complete Sync <ArrowRight className="w-5 h-5" /></>}
                             </button>
                         </motion.div>
@@ -877,6 +966,15 @@ function FormInput({ label, icon: Icon, value, onChange, placeholder, type = "te
                 <Icon className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-white/20 group-focus-within:text-cyan-400 transition-colors" />
                 <input type={type} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} className="w-full bg-white/5 border border-white/10 rounded-2xl py-3.5 pl-11 pr-4 outline-none focus:border-cyan-500/50 transition-all font-medium text-white placeholder:text-white/10 text-xs sm:text-sm" />
             </div>
+        </div>
+    );
+}
+
+function ReviewRow({ label, value }: { label: string, value: string }) {
+    return (
+        <div className="flex justify-between items-center text-xs">
+            <span className="text-white/30 uppercase font-black tracking-widest text-[9px]">{label}</span>
+            <span className="font-bold text-white/80">{value || "---"}</span>
         </div>
     );
 }

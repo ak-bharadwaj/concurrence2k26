@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { getJoinRequests, respondToJoinRequest, removeMemberFromTeam, leaveTeam, updateTeamSettings, addMemberToTeam, updateMemberDetails, deleteTeam, submitPayment, getNextAvailableQR } from "@/lib/supabase-actions";
-import { Loader2, Users, Crown, Copy, Check, UserMinus, LogOut, Settings, ArrowLeft, UserPlus, X, Edit3, Save, Trash2, ShieldCheck, Plus, CreditCard, Upload } from "lucide-react";
+import { Loader2, Users, Crown, Copy, Check, UserMinus, LogOut, Settings, ArrowLeft, UserPlus, X, Edit3, Save, Trash2, ShieldCheck, Plus, CreditCard, Upload, Clock } from "lucide-react";
 import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
 import { getFriendlyError } from "@/lib/error-handler";
@@ -66,30 +66,29 @@ export default function TeamPage() {
                 return;
             }
 
-            const { data: teamData, error: tErr } = await supabase
-                .from("teams")
-                .select("*")
-                .eq("id", userData.team_id)
-                .single();
-
-            if (tErr) throw tErr;
-            setTeam(teamData);
-
-            const { data: membersData } = await supabase
-                .from("users")
-                .select("id, name, reg_no, role, status, email")
-                .eq("team_id", userData.team_id)
-                .order("role", { ascending: false });
-
-            setMembers(membersData || []);
+            // Parallelize fetching for Team, Members, and Requests (if leader)
+            const promises: any[] = [
+                supabase.from("teams").select("*").eq("id", userData.team_id).single(),
+                supabase.from("users").select("id, name, reg_no, role, status, email").eq("team_id", userData.team_id).order("role", { ascending: false })
+            ];
 
             if (userData.role === "LEADER") {
-                const [pReqs, aReqs] = await Promise.all([
-                    getJoinRequests(userData.team_id, 'PENDING'),
-                    getJoinRequests(userData.team_id, 'ACCEPTED')
-                ]);
-                setJoinRequests(pReqs || []);
-                setAcceptedRequests(aReqs || []);
+                promises.push(getJoinRequests(userData.team_id, 'PENDING'));
+                promises.push(getJoinRequests(userData.team_id, 'ACCEPTED'));
+            }
+
+            // Execute all queries concurrently
+            const results = await Promise.all(promises);
+            const teamRes = results[0];
+            const membersRes = results[1];
+
+            if (teamRes.error) throw teamRes.error;
+            setTeam(teamRes.data);
+            setMembers(membersRes.data || []);
+
+            if (userData.role === "LEADER") {
+                setJoinRequests(results[2] || []);
+                setAcceptedRequests(results[3] || []);
             }
         } catch (err: any) {
             setError(getFriendlyError(err));
@@ -114,16 +113,36 @@ export default function TeamPage() {
         const sessionCookie = document.cookie.split(';').find(c => c.trim().startsWith('student_session='));
         const userId = sessionCookie?.split('=')[1];
 
-        if (userId && team?.id) {
-            const teamChannel = supabase.channel(`team_page_sync_${userId}`);
-
-            teamChannel
-                .on('postgres_changes', { event: '*', schema: 'public', table: 'teams', filter: `id=eq.${team.id}` }, () => debouncedFetch(true))
-                .on('postgres_changes', { event: '*', schema: 'public', table: 'users', filter: `team_id=eq.${team.id}` }, () => debouncedFetch(true))
-                .on('postgres_changes', { event: '*', schema: 'public', table: 'join_requests', filter: `team_id=eq.${team.id}` }, () => debouncedFetch(true))
+        if (userId) {
+            const userChannel = supabase.channel(`user_status_sync_${userId}`);
+            userChannel
+                .on('postgres_changes',
+                    { event: 'UPDATE', schema: 'public', table: 'users', filter: `id=eq.${userId}` },
+                    (payload) => {
+                        // If team_id was null and is now set, refetch
+                        if (payload.new.team_id) {
+                            debouncedFetch(false);
+                        } else {
+                            debouncedFetch(true);
+                        }
+                    }
+                )
                 .subscribe();
 
-            return () => { teamChannel.unsubscribe(); };
+            let teamChannel: any = null;
+            if (team?.id) {
+                teamChannel = supabase.channel(`team_page_sync_${userId}`);
+                teamChannel
+                    .on('postgres_changes', { event: '*', schema: 'public', table: 'teams', filter: `id=eq.${team.id}` }, () => debouncedFetch(true))
+                    .on('postgres_changes', { event: '*', schema: 'public', table: 'users', filter: `team_id=eq.${team.id}` }, () => debouncedFetch(true))
+                    .on('postgres_changes', { event: '*', schema: 'public', table: 'join_requests', filter: `team_id=eq.${team.id}` }, () => debouncedFetch(true))
+                    .subscribe();
+            }
+
+            return () => {
+                supabase.removeChannel(userChannel);
+                if (teamChannel) supabase.removeChannel(teamChannel);
+            };
         }
     }, [team?.id, debouncedFetch]);
 
@@ -445,6 +464,26 @@ export default function TeamPage() {
                             </div>
                         </div>
                     </div>
+                )}
+
+                {/* SQUAD INCOMPLETE WARNING */}
+                {!isCreatingFirstSquad && members.some(m => m.status === 'UNPAID') && (
+                    <motion.div
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        className="mb-8 p-6 bg-red-500/10 border-2 border-dashed border-red-500/50 rounded-[2rem] text-center relative overflow-hidden group"
+                    >
+                        <div className="absolute inset-0 bg-red-500/5 animate-pulse" />
+                        <div className="relative z-10">
+                            <div className="w-12 h-12 bg-red-500 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-[0_0_20px_rgba(239,68,68,0.4)]">
+                                <ShieldCheck className="w-6 h-6 text-white" />
+                            </div>
+                            <h3 className="text-xl font-black uppercase tracking-tighter text-red-500 mb-2">Squad Incomplete</h3>
+                            <p className="text-xs text-red-200/60 uppercase font-black tracking-widest max-w-md mx-auto leading-relaxed">
+                                This unit is not officially considered for the event until all members are verified. Ensure every warrior has transmitted their entry fee.
+                            </p>
+                        </div>
+                    </motion.div>
                 )}
 
                 {/* Join Requests & Add Member (Leader Only) */}

@@ -59,27 +59,39 @@ export default function DashboardPage() {
                 }
                 throw uErr;
             }
+
+            // Safety: If user is deleted via admin but cookie persists, clear and redirect
+            if (!userData) {
+                document.cookie = "student_session=; path=/; max-age=0;";
+                router.push("/login");
+                return;
+            }
+
             setUser(userData);
 
             if (userData.team_id) {
-                const { data: teamData, error: tErr } = await supabase
-                    .from("teams")
-                    .select("*")
-                    .eq("id", userData.team_id)
-                    .single();
+                // Parallelize Team and Members fetch for speed
+                const [teamRes, membersRes] = await Promise.all([
+                    supabase.from("teams").select("*").eq("id", userData.team_id).single(),
+                    supabase.from("users").select("name, role, status").eq("team_id", userData.team_id)
+                ]);
 
-                if (!tErr) {
-                    const { data: members } = await supabase
-                        .from("users")
-                        .select("name, role, status")
-                        .eq("team_id", userData.team_id);
+                if (teamRes.error && teamRes.error.code !== 'PGRST116') {
+                    // If team fetch fails but it's not a "not found" error, log it.
+                    // If it is "not found", we just don't set the team (user might have a stale team_id)
+                    console.error("Team fetch error:", teamRes.error);
+                }
 
-                    setTeam({ ...teamData, members });
+                if (teamRes.data) {
+                    setTeam({ ...teamRes.data, members: membersRes.data || [] });
+                } else {
+                    setTeam(null);
                 }
             } else {
                 setTeam(null);
             }
 
+            // Fetch tickets in parallel or after user data is confirmed
             const ticketsData = await getUserSupportTickets(userId);
             setTickets(ticketsData || []);
         } catch (err: any) {
@@ -274,18 +286,12 @@ export default function DashboardPage() {
 
                                 {user.status === 'UNPAID' && (
                                     <div className="mt-6">
-                                        {team?.payment_mode === 'BULK' && user.role !== 'LEADER' ? (
-                                            <div className="px-6 py-3 bg-white/10 rounded-xl text-xs font-black uppercase tracking-widest text-white/60 border border-white/10">
-                                                Waiting for Captain Payment
-                                            </div>
-                                        ) : (
-                                            <button
-                                                onClick={handleInitiatePayment}
-                                                className="px-8 py-4 bg-white text-black font-black text-xs uppercase tracking-widest rounded-xl hover:bg-cyan-400 transition-all shadow-[0_0_20px_rgba(255,255,255,0.3)] flex items-center gap-2"
-                                            >
-                                                Initialize Payment Sequence <ChevronRight className="w-4 h-4" />
-                                            </button>
-                                        )}
+                                        <button
+                                            onClick={handleInitiatePayment}
+                                            className="px-8 py-4 bg-white text-black font-black text-xs uppercase tracking-widest rounded-xl hover:bg-cyan-400 transition-all shadow-[0_0_20px_rgba(255,255,255,0.3)] flex items-center gap-2"
+                                        >
+                                            Initialize Payment Sequence <ChevronRight className="w-4 h-4" />
+                                        </button>
                                     </div>
                                 )}
                             </div>

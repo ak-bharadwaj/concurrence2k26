@@ -44,7 +44,14 @@ export default function SubDashboard() {
                 "postgres_changes",
                 { event: "*", schema: "public", table: "users" },
                 () => {
-                    fetchUsers();
+                    fetchUsers(true);
+                }
+            )
+            .on(
+                "postgres_changes",
+                { event: "*", schema: "public", table: "teams" },
+                () => {
+                    fetchUsers(true);
                 }
             )
             .subscribe();
@@ -54,9 +61,9 @@ export default function SubDashboard() {
         };
     }, []);
 
-    const fetchUsers = async () => {
+    const fetchUsers = async (silent = false) => {
         try {
-            setLoading(true);
+            if (!silent) setLoading(true);
             const { data, error } = await supabase
                 .from("users")
                 .select("*, squad:teams!team_id(name)")
@@ -82,36 +89,34 @@ export default function SubDashboard() {
 
     const handleAction = async (user: any, action: "VERIFYING" | "APPROVED" | "REJECTED") => {
         try {
+            // Optimistic Update: Immediately reflect change in UI
+            if (action === "REJECTED") {
+                const confirm = window.confirm(`Are you sure you want to REJECT and DELETE ${user.name}?`);
+                if (!confirm) return;
+                setUsers(prev => prev.filter(u => u.id !== user.id));
+            } else {
+                setUsers(prev => prev.map(u => u.id === user.id ? { ...u, status: action } : u));
+            }
+
             setProcessingId(user.id);
 
             if (action === "APPROVED") {
-                const confirm = window.confirm(`Are you sure you want to APPROVE ${user.name}?`);
-                if (!confirm) return;
-
                 const link = await getActiveGroupLink(user.college);
-
                 await updateStatus(user.id, admin.id, "APPROVED", "APPROVE_PAYMENT", link || "");
-                if (!link) {
-                    // No active group link found.
-                }
             } else if (action === "REJECTED") {
-                const confirm = window.confirm(`Are you sure you want to REJECT ${user.name}?`);
-                if (!confirm) return;
-
                 await updateStatus(user.id, admin.id, "REJECTED", "REJECT_PAYMENT");
-                // Delete from DB as requested: "If rejects, no need to enter in the main database"
                 await deleteUser(user.id);
-                fetchUsers(); // Refresh the list
             } else if (action === "VERIFYING") {
                 const updatedUser = await updateStatus(user.id, admin.id, "VERIFYING", "START_VERIFICATION");
                 if (!updatedUser) {
                     alert("Action failed: User status was already updated by another admin.");
+                    fetchUsers(true); // Sync back
                     return;
                 }
             }
-
         } catch (err: any) {
             alert("Action failed: " + getFriendlyError(err));
+            fetchUsers(true); // Rollback/Sync
         } finally {
             setProcessingId(null);
         }
@@ -165,126 +170,185 @@ export default function SubDashboard() {
                             className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-12 pr-4 outline-none focus:border-cyan-500/50 transition-all"
                         />
                     </div>
-                    <button onClick={fetchUsers} className="px-4 py-3 bg-white/5 border border-white/10 rounded-xl hover:bg-white/10 transition-all flex items-center gap-2">
+                    <button onClick={() => fetchUsers()} className="px-4 py-3 bg-white/5 border border-white/10 rounded-xl hover:bg-white/10 transition-all flex items-center gap-2">
                         <RefreshCcw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
                         Refresh
                     </button>
                 </div>
 
-                <div className="bg-white/[0.02] border border-white/10 rounded-2xl overflow-hidden">
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-left min-w-[800px]">
-                            <thead>
-                                <tr className="border-b border-white/10 text-[10px] uppercase tracking-widest text-white/40 bg-white/5">
-                                    <th className="px-6 py-4">User Details</th>
-                                    <th className="px-6 py-4">Squad</th>
-                                    <th className="px-6 py-4">College/Branch</th>
-                                    <th className="px-6 py-4">Payment Proof</th>
-                                    <th className="px-6 py-4">Status</th>
-                                    <th className="px-6 py-4 text-right">Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-white/5">
-                                {filteredUsers.map((user) => {
-                                    const isLockedByOther = user.status === 'VERIFYING' && user.verified_by !== admin.id;
+                <div className="space-y-4">
+                    {/* Mobile Card View */}
+                    <div className="flex flex-col gap-4 lg:hidden">
+                        {filteredUsers.map((user) => {
+                            const isLockedByOther = user.status === 'VERIFYING' && user.verified_by !== admin.id;
+                            return (
+                                <div key={user.id} className={`bg-white/[0.02] border border-white/10 rounded-xl p-4 space-y-3 ${isLockedByOther ? 'opacity-50 grayscale' : ''}`}>
+                                    <div className="flex justify-between items-start">
+                                        <div>
+                                            <div className="font-semibold text-white flex items-center gap-2">
+                                                {user.name}
+                                                {isLockedByOther && <Lock className="w-3 h-3 text-red-500" />}
+                                            </div>
+                                            <div className="text-xs text-white/40">{user.reg_no}</div>
+                                        </div>
+                                        <StatusBadge status={user.status} />
+                                    </div>
 
-                                    return (
-                                        <tr key={user.id} className={`hover:bg-white/[0.02] transition-colors group ${isLockedByOther ? 'opacity-50 grayscale' : ''}`}>
-                                            <td className="px-6 py-4">
-                                                <div className="font-semibold flex items-center gap-2">
-                                                    {user.name}
-                                                    {isLockedByOther && <Lock className="w-3 h-3 text-red-500" />}
-                                                </div>
-                                                <div className="text-xs text-white/40">{user.reg_no} • {user.email}</div>
-                                                <div className="text-[10px] text-cyan-500/60 font-medium">{user.phone}</div>
-                                            </td>
-                                            <td className="px-6 py-4">
-                                                {user.squad ? (
-                                                    <div className="max-w-[150px]">
-                                                        <div className="text-[11px] font-black uppercase text-purple-400 truncate">{user.squad.name}</div>
+                                    <div className="grid grid-cols-2 gap-2 text-xs">
+                                        <div className="space-y-1">
+                                            <div className="text-[10px] text-white/20 uppercase font-black">Squad</div>
+                                            {user.squad ? (
+                                                <div className="font-bold text-purple-400 truncate">{user.squad.name}</div>
+                                            ) : (
+                                                <div className="font-bold text-white/20">SOLO</div>
+                                            )}
+                                        </div>
+                                        <div className="space-y-1">
+                                            <div className="text-[10px] text-white/20 uppercase font-black">Proof</div>
+                                            {user.screenshot_url ? (
+                                                <a href={user.screenshot_url} target="_blank" rel="noreferrer" className="text-cyan-400 hover:underline flex items-center gap-1">View <Eye className="w-3 h-3" /></a>
+                                            ) : <span className="text-white/20">N/A</span>}
+                                        </div>
+                                        <div className="space-y-1 col-span-2">
+                                            <div className="text-[10px] text-white/20 uppercase font-black">Branch</div>
+                                            <div>{user.college} - {user.branch}</div>
+                                        </div>
+                                    </div>
+
+                                    {!isLockedByOther && (
+                                        <div className="flex gap-2 pt-2 border-t border-white/5">
+                                            {user.status === 'PENDING' && (
+                                                <ActionButton onClick={() => handleAction(user, 'VERIFYING')} icon={Clock} label="Verify" color="hover:text-yellow-400" disabled={processingId === user.id} />
+                                            )}
+                                            {(user.status === 'PENDING' || user.status === 'VERIFYING') && (
+                                                <>
+                                                    <ActionButton onClick={() => handleAction(user, 'APPROVED')} icon={CheckCircle} label="Approve" color="hover:text-green-400" disabled={processingId === user.id} />
+                                                    <ActionButton onClick={() => handleAction(user, 'REJECTED')} icon={XCircle} label="Reject" color="hover:text-red-400" disabled={processingId === user.id} />
+                                                </>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
+
+                    {/* Desktop Table View */}
+                    <div className="bg-white/[0.02] border border-white/10 rounded-2xl overflow-hidden hidden lg:block">
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-left min-w-[800px]">
+                                <thead>
+                                    <tr className="border-b border-white/10 text-[10px] uppercase tracking-widest text-white/40 bg-white/5">
+                                        <th className="px-6 py-4">User Details</th>
+                                        <th className="px-6 py-4">Squad</th>
+                                        <th className="px-6 py-4">College/Branch</th>
+                                        <th className="px-6 py-4">Payment Proof</th>
+                                        <th className="px-6 py-4">Status</th>
+                                        <th className="px-6 py-4 text-right">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-white/5">
+                                    {filteredUsers.map((user) => {
+                                        const isLockedByOther = user.status === 'VERIFYING' && user.verified_by !== admin.id;
+
+                                        return (
+                                            <tr key={user.id} className={`hover:bg-white/[0.02] transition-colors group ${isLockedByOther ? 'opacity-50 grayscale' : ''}`}>
+                                                <td className="px-6 py-4">
+                                                    <div className="font-semibold flex items-center gap-2">
+                                                        {user.name}
+                                                        {isLockedByOther && <Lock className="w-3 h-3 text-red-500" />}
                                                     </div>
-                                                ) : (
-                                                    <span className="text-[9px] font-bold text-white/10 uppercase tracking-widest border border-white/5 px-2 py-0.5 rounded">Solo</span>
-                                                )}
-                                            </td>
-                                            <td className="px-6 py-4">
-                                                <div className="flex flex-col gap-1">
-                                                    <span className={`px-2 py-0.5 rounded-full text-[10px] w-fit ${user.college?.includes('RGM') ? 'bg-cyan-500/10 text-cyan-400' : 'bg-purple-500/10 text-purple-400'}`}>
-                                                        {user.college || 'N/A'}
-                                                    </span>
-                                                    <span className="text-[10px] font-bold text-white/60 tracking-wider ml-1">
-                                                        {user.branch || 'NO BRANCH'}
-                                                    </span>
-                                                </div>
-                                            </td>
-                                            <td className="px-6 py-4">
-                                                <div className="flex items-center gap-2">
-                                                    {user.screenshot_url && (
-                                                        <a
-                                                            href={user.screenshot_url}
-                                                            target="_blank"
-                                                            rel="noreferrer"
-                                                            className="w-10 h-10 rounded-lg bg-white/5 border border-white/10 overflow-hidden relative group/img shrink-0"
-                                                        >
-                                                            <Image src={user.screenshot_url} alt="Proof" fill className="object-cover" />
-                                                            <div className="absolute inset-0 bg-black/60 flex items-center justify-center opacity-0 group-hover/img:opacity-100 transition-opacity">
-                                                                <Eye className="w-4 h-4" />
-                                                            </div>
-                                                        </a>
+                                                    <div className="text-xs text-white/40">{user.reg_no} • {user.email}</div>
+                                                    <div className="text-[10px] text-cyan-500/60 font-medium">{user.phone}</div>
+                                                </td>
+                                                <td className="px-6 py-4">
+                                                    {user.squad ? (
+                                                        <div className="max-w-[150px]">
+                                                            <div className="text-[11px] font-black uppercase text-purple-400 truncate">{user.squad.name}</div>
+                                                        </div>
+                                                    ) : (
+                                                        <span className="text-[9px] font-bold text-white/10 uppercase tracking-widest border border-white/5 px-2 py-0.5 rounded">Solo</span>
                                                     )}
-                                                    <div className="text-[10px] font-mono text-white/30 truncate max-w-[100px]">UTR: {user.transaction_id}</div>
-                                                </div>
-                                            </td>
-                                            <td className="px-6 py-4">
-                                                <div className="flex flex-col gap-1">
-                                                    <StatusBadge status={user.status} />
-                                                    {user.status === 'VERIFYING' && (
-                                                        <span className="text-[8px] text-white/20 uppercase tracking-tighter">
-                                                            {isLockedByOther ? 'By Other Admin' : 'By You'}
+                                                </td>
+                                                <td className="px-6 py-4">
+                                                    <div className="flex flex-col gap-1">
+                                                        <span className={`px-2 py-0.5 rounded-full text-[10px] w-fit ${user.college?.includes('RGM') ? 'bg-cyan-500/10 text-cyan-400' : 'bg-purple-500/10 text-purple-400'}`}>
+                                                            {user.college || 'N/A'}
                                                         </span>
-                                                    )}
-                                                </div>
-                                            </td>
-                                            <td className="px-6 py-4 text-right">
-                                                <div className="flex items-center justify-end gap-2">
-                                                    {!isLockedByOther && (
-                                                        <>
-                                                            {user.status === 'PENDING' && (
-                                                                <ActionButton
-                                                                    onClick={() => handleAction(user, 'VERIFYING')}
-                                                                    icon={Clock}
-                                                                    label="Start Verify"
-                                                                    color="hover:text-yellow-400"
-                                                                    disabled={processingId === user.id}
-                                                                />
-                                                            )}
-                                                            {(user.status === 'PENDING' || user.status === 'VERIFYING') && (
-                                                                <>
+                                                        <span className="text-[10px] font-bold text-white/60 tracking-wider ml-1">
+                                                            {user.branch || 'NO BRANCH'}
+                                                        </span>
+                                                    </div>
+                                                </td>
+                                                <td className="px-6 py-4">
+                                                    <div className="flex items-center gap-2">
+                                                        {user.screenshot_url && (
+                                                            <a
+                                                                href={user.screenshot_url}
+                                                                target="_blank"
+                                                                rel="noreferrer"
+                                                                className="w-10 h-10 rounded-lg bg-white/5 border border-white/10 overflow-hidden relative group/img shrink-0"
+                                                            >
+                                                                <Image src={user.screenshot_url} alt="Proof" fill className="object-cover" />
+                                                                <div className="absolute inset-0 bg-black/60 flex items-center justify-center opacity-0 group-hover/img:opacity-100 transition-opacity">
+                                                                    <Eye className="w-4 h-4" />
+                                                                </div>
+                                                            </a>
+                                                        )}
+                                                        <div className="text-[10px] font-mono text-white/30 truncate max-w-[100px]">UTR: {user.transaction_id}</div>
+                                                    </div>
+                                                </td>
+                                                <td className="px-6 py-4">
+                                                    <div className="flex flex-col gap-1">
+                                                        <StatusBadge status={user.status} />
+                                                        {user.status === 'VERIFYING' && (
+                                                            <span className="text-[8px] text-white/20 uppercase tracking-tighter">
+                                                                {isLockedByOther ? 'By Other Admin' : 'By You'}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                </td>
+                                                <td className="px-6 py-4 text-right">
+                                                    <div className="flex items-center justify-end gap-2">
+                                                        {!isLockedByOther && (
+                                                            <>
+                                                                {user.status === 'PENDING' && (
                                                                     <ActionButton
-                                                                        onClick={() => handleAction(user, 'APPROVED')}
-                                                                        icon={CheckCircle}
-                                                                        label="Approve"
-                                                                        color="hover:text-green-400"
+                                                                        onClick={() => handleAction(user, 'VERIFYING')}
+                                                                        icon={Clock}
+                                                                        label="Start Verify"
+                                                                        color="hover:text-yellow-400"
                                                                         disabled={processingId === user.id}
                                                                     />
-                                                                    <ActionButton
-                                                                        onClick={() => handleAction(user, 'REJECTED')}
-                                                                        icon={XCircle}
-                                                                        label="Reject"
-                                                                        color="hover:text-red-400"
-                                                                        disabled={processingId === user.id}
-                                                                    />
-                                                                </>
-                                                            )}
-                                                        </>
-                                                    )}
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    );
-                                })}
-                            </tbody>
-                        </table>
+                                                                )}
+                                                                {(user.status === 'PENDING' || user.status === 'VERIFYING') && (
+                                                                    <>
+                                                                        <ActionButton
+                                                                            onClick={() => handleAction(user, 'APPROVED')}
+                                                                            icon={CheckCircle}
+                                                                            label="Approve"
+                                                                            color="hover:text-green-400"
+                                                                            disabled={processingId === user.id}
+                                                                        />
+                                                                        <ActionButton
+                                                                            onClick={() => handleAction(user, 'REJECTED')}
+                                                                            icon={XCircle}
+                                                                            label="Reject"
+                                                                            color="hover:text-red-400"
+                                                                            disabled={processingId === user.id}
+                                                                        />
+                                                                    </>
+                                                                )}
+                                                            </>
+                                                        )}
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
             </main>

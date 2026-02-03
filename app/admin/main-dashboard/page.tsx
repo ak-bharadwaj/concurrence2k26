@@ -38,7 +38,7 @@ import { Scanner } from "@yudiel/react-qr-scanner";
 import ExcelJS from "exceljs";
 import { supabase } from "@/lib/supabase";
 import { getAdminSession, adminLogout } from "@/lib/auth";
-import { updateStatus, getActiveGroupLink, deleteUser, resetQRUsage, markAttendance, fetchAttendanceReport, sendCustomUserEmail, approveTeamPayment } from "@/lib/supabase-actions";
+import { updateStatus, getActiveGroupLink, deleteUser, resetQRUsage, markAttendance, fetchAttendanceReport, sendCustomUserEmail, approveTeamPayment, createTeam, deleteTeam } from "@/lib/supabase-actions";
 import { getFriendlyError } from "@/lib/error-handler";
 import Image from "next/image";
 import { MemberDetailModal } from "./MemberDetailModal";
@@ -112,16 +112,16 @@ export default function MainDashboard() {
             .channel('dashboard-changes')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, () => {
                 // Always fetch full data to ensures derived states (like squads) are correctly recalculated
-                fetchAllData();
+                fetchAllData(true);
             })
             .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, () => {
-                fetchAllData();
+                fetchAllData(true);
             })
             .on('postgres_changes', { event: '*', schema: 'public', table: 'teams' }, () => {
-                fetchAllData();
+                fetchAllData(true);
             })
             .on('postgres_changes', { event: '*', schema: 'public', table: 'join_requests' }, () => {
-                fetchAllData();
+                fetchAllData(true);
             })
             .on('postgres_changes', { event: '*', schema: 'public', table: 'qr_codes' }, (payload: any) => {
                 if (payload.eventType === 'UPDATE') {
@@ -130,8 +130,17 @@ export default function MainDashboard() {
                         qr: prev.qr.map((q: any) => q.id === payload.new.id ? { ...q, ...payload.new } : q)
                     }));
                 } else {
-                    fetchAllData();
+                    fetchAllData(true);
                 }
+            })
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'admins' }, () => {
+                fetchAllData(true);
+            })
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'email_accounts' }, () => {
+                fetchAllData(true);
+            })
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'group_links' }, () => {
+                fetchAllData(true);
             })
             .subscribe();
 
@@ -324,9 +333,9 @@ export default function MainDashboard() {
         }
     };
 
-    const fetchAllData = async () => {
+    const fetchAllData = async (silent = false) => {
         try {
-            setLoading(true);
+            if (!silent) setLoading(true);
             const results = await Promise.all([
                 supabase.from("users").select("*, team_id, squad:teams!team_id(name, unique_code, team_number)").order("created_at", { ascending: false }),
                 supabase.from("admins").select("id, username, role, active, created_at").order("created_at", { ascending: false }),
@@ -334,7 +343,8 @@ export default function MainDashboard() {
                 supabase.from("email_accounts").select("id, email_address, smtp_host, smtp_port, active, created_at").order("created_at", { ascending: false }),
                 supabase.from("group_links").select("*").order("created_at", { ascending: false }),
                 supabase.from("action_logs").select("*, users!user_id(name), admins(username)").order("timestamp", { ascending: false }).limit(50),
-                supabase.from("teams").select("*")
+                supabase.from("teams").select("*"),
+                supabase.from("join_requests").select("*, teams(name, unique_code)").eq("status", "PENDING")
             ]);
 
             // Robust individual error checks
@@ -345,9 +355,18 @@ export default function MainDashboard() {
                 alert("Some data failed to sync: \n" + errors.join("\n"));
             }
 
-            const [users, admins, qr, emails, groups, logs, teams] = results.map(r => r.data);
+            const [users, admins, qr, emails, groups, logs, teams, joinRequests] = results.map(r => r.data);
 
-            const processedUsers = (users || []).sort((a: any, b: any) => {
+            const processedUsers = (users || []).map((u: any) => {
+                const request = (joinRequests || []).find((r: any) => r.user_id === u.id);
+                return {
+                    ...u,
+                    pendingJoin: request ? {
+                        teamName: request.teams?.name,
+                        teamCode: request.teams?.unique_code
+                    } : null
+                };
+            }).sort((a: any, b: any) => {
                 const priorityStatus = ["VERIFYING", "PENDING"];
                 const aPriority = priorityStatus.indexOf(a.status);
                 const bPriority = priorityStatus.indexOf(b.status);
@@ -374,7 +393,7 @@ export default function MainDashboard() {
                 // Filter out users who have a team_id (truthy)
                 ...(users || []).filter((u: any) => !u.team_id).map((u: any) => ({
                     id: `SOLO-${u.id}`,
-                    name: `${u.name}'s Party`,
+                    name: `${u.name}`,
                     unique_code: 'SOLO',
                     isVirtual: true,
                     payment_mode: 'INDIVIDUAL',
@@ -500,73 +519,63 @@ export default function MainDashboard() {
     const handleDeleteUser = async (id: string) => {
         if (!window.confirm("Are you sure you want to delete this user? This cannot be undone.")) return;
         try {
-            setLoading(true);
+            // Optimistic Update
+            setData((prev: any) => ({
+                ...prev,
+                users: prev.users.filter((u: any) => u.id !== id)
+            }));
             const { error } = await supabase.from("users").delete().eq("id", id);
             if (error) throw error;
-            fetchAllData();
         } catch (err: any) {
             alert("Delete failed: " + err.message);
-        } finally {
-            setLoading(false);
+            fetchAllData(true); // Sync
         }
     };
 
     const handleInlineSave = async (id: string, field: string, value: string) => {
         try {
-            setLoading(true);
-
-            // Handle rejection by deleting
-            if (field === 'status' && value === 'REJECTED') {
-                const confirmDelete = window.confirm("Rejecting will PERMANENTLY DELETE this user from the database. Continue?");
-                if (!confirmDelete) return;
-
-                const { error: delError } = await supabase.from("users").delete().eq("id", id);
-                if (delError) throw delError;
-
-                setData((prev: any) => ({
-                    ...prev,
-                    users: prev.users.filter((u: any) => u.id !== id)
-                }));
-                alert("User rejected and deleted from database.");
-                return;
-            }
-
+            // Optimistic update
             if (field === 'status') {
-                const user = data.users.find((u: any) => u.id === id);
-                if (!user) throw new Error("User not found");
-
-                const link = value === 'APPROVED' ? await getActiveGroupLink(user.college) : "";
-                await updateStatus(id, admin.id, value as any, "MANUAL_STATUS_OVERRIDE", link || "");
+                if (value === 'REJECTED') {
+                    const confirmDelete = window.confirm("Rejecting will PERMANENTLY DELETE this user from the database. Continue?");
+                    if (!confirmDelete) return;
+                }
 
                 setData((prev: any) => ({
                     ...prev,
                     users: prev.users.map((u: any) => u.id === id ? { ...u, status: value, is_present: value === 'APPROVED' } : u)
                 }));
-                return;
+            } else {
+                setData((prev: any) => ({
+                    ...prev,
+                    users: prev.users.map((u: any) => u.id === id ? { ...u, [field]: value } : u)
+                }));
             }
 
-            const { error } = await supabase
-                .from("users")
-                .update({ [field]: value })
-                .eq("id", id);
+            // Perform DB action
+            if (field === 'status') {
+                if (value === 'REJECTED') {
+                    await supabase.from("users").delete().eq("id", id);
+                    alert("User rejected and deleted.");
+                } else {
+                    const user = data.users.find((u: any) => u.id === id);
+                    const link = value === 'APPROVED' ? await getActiveGroupLink(user?.college || "") : "";
+                    await updateStatus(id, admin.id, value as any, "MANUAL_STATUS_OVERRIDE", link || "");
+                }
+            } else {
+                const { error } = await supabase.from("users").update({ [field]: value }).eq("id", id);
+                if (error) throw error;
 
-            if (error) throw error;
-
-            setData((prev: any) => ({
-                ...prev,
-                users: prev.users.map((u: any) => u.id === id ? { ...u, [field]: value } : u)
-            }));
-
-            await supabase.from("action_logs").insert([{
-                admin_id: admin.id,
-                user_id: id,
-                action: `EDITED_${field.toUpperCase()}`
-            }]);
-
+                await supabase.from("action_logs").insert([{
+                    admin_id: admin.id,
+                    user_id: id,
+                    action: `EDITED_${field.toUpperCase()}`
+                }]);
+            }
         } catch (err: any) {
             alert("Failed to save: " + err.message);
+            fetchAllData(true); // Rollback/Sync
         } finally {
-            setLoading(false);
             setEditingId(null);
             setEditField(null);
         }
@@ -574,21 +583,28 @@ export default function MainDashboard() {
 
     const handleVerifyAction = async (user: any, action: "APPROVED" | "REJECTED") => {
         try {
-            setLoading(true);
+            // Optimistic Update
+            setData((prev: any) => ({
+                ...prev,
+                users: action === "REJECTED"
+                    ? prev.users.filter((u: any) => u.id !== user.id)
+                    : prev.users.map((u: any) => u.id === user.id ? { ...u, status: action, is_present: action === "APPROVED" } : u)
+            }));
 
             if (action === "APPROVED") {
                 const link = await getActiveGroupLink(user.college);
                 await updateStatus(user.id, admin.id, "APPROVED", "APPROVE_PAYMENT", link || "");
             } else if (action === "REJECTED") {
-                if (!window.confirm("Reject and DELETE this user?")) return;
+                if (!window.confirm("Reject and DELETE this user?")) {
+                    fetchAllData(true); // Rollback
+                    return;
+                }
                 await updateStatus(user.id, admin.id, "REJECTED", "REJECT_PAYMENT");
                 await deleteUser(user.id);
             }
-            fetchAllData();
         } catch (err: any) {
             alert("Action failed: " + getFriendlyError(err));
-        } finally {
-            setLoading(false);
+            fetchAllData(true); // Sync
         }
     };
 
@@ -1025,29 +1041,58 @@ export default function MainDashboard() {
                 // When removing from team (teamId is null/empty), reset to MEMBER
                 const updateData: any = { team_id: teamId || null };
                 if (teamId) {
-                    updateData.role = 'MEMBER';
+                    // Check if team has a leader
+                    const targetTeam = data.teams.find((t: any) => t.id === teamId);
+                    const hasLeader = targetTeam?.members?.some((m: any) => m.role === 'LEADER');
+
+                    if (!hasLeader) {
+                        // In bulk, if we have selected users, the first one gets LEADER
+                        // This requires two separate updates or a conditional map
+                        const [firstId, ...restIds] = selectedUsers;
+
+                        // First update for the new leader
+                        const { error: leaderErr } = await supabase
+                            .from("users")
+                            .update({ team_id: teamId, role: 'LEADER' })
+                            .eq("id", firstId);
+                        if (leaderErr) throw leaderErr;
+
+                        // Second update for the rest
+                        if (restIds.length > 0) {
+                            const { error: restErr } = await supabase
+                                .from("users")
+                                .update({ team_id: teamId, role: 'MEMBER' })
+                                .in("id", restIds);
+                            if (restErr) throw restErr;
+                        }
+                    } else {
+                        // Team already has leader, everyone else is member
+                        const { error } = await supabase
+                            .from("users")
+                            .update({ team_id: teamId, role: 'MEMBER' })
+                            .in("id", selectedUsers);
+                        if (error) throw error;
+                    }
                 } else {
-                    updateData.role = 'MEMBER'; // Reset role when removing from team
+                    // Reset role when removing from team
+                    const { error } = await supabase
+                        .from("users")
+                        .update({ team_id: null, role: 'MEMBER' })
+                        .in("id", selectedUsers);
+                    if (error) throw error;
                 }
-
-                const { error } = await supabase
-                    .from("users")
-                    .update(updateData)
-                    .in("id", selectedUsers);
-
-                if (error) throw error;
                 alert(`Successfully merged ${selectedUsers.length} warriors!`);
                 setSelectedUsers([]);
             } else {
                 // SINGLE MOVE LOGIC
                 const updateData: any = { team_id: teamId || null };
 
-                // Set role based on destination
                 if (teamId) {
-                    // Moving to a team - set as MEMBER
-                    updateData.role = 'MEMBER';
+                    // Check if team has a leader
+                    const targetTeam = data.teams.find((t: any) => t.id === teamId);
+                    const hasLeader = targetTeam?.members?.some((m: any) => m.role === 'LEADER');
+                    updateData.role = hasLeader ? 'MEMBER' : 'LEADER';
                 } else {
-                    // Removing from team - reset to MEMBER
                     updateData.role = 'MEMBER';
                 }
 
@@ -1086,12 +1131,8 @@ export default function MainDashboard() {
         if (!confirm("Start Squad Disbandment Protocol? This will release all warriors.")) return;
         try {
             setLoading(true);
-            // 1. Release members
-            const { error: releaseErr } = await supabase.from('users').update({ team_id: null }).eq('team_id', teamId);
-            if (releaseErr) throw releaseErr;
-            // 2. Delete team
-            const { error: delErr } = await supabase.from('teams').delete().eq('id', teamId);
-            if (delErr) throw delErr;
+            // Use server action to ensure consistent logic (status reset, role update)
+            await deleteTeam(teamId);
             fetchAllData();
         } catch (err: any) { alert(err.message); } finally { setLoading(false); }
     };
@@ -1101,22 +1142,34 @@ export default function MainDashboard() {
         if (!name) return;
         try {
             setLoading(true);
-            // 1. Create Team
-            const { data: team, error: createErr } = await supabase.from('teams').insert({
-                name,
-                unique_code: Math.random().toString(36).substring(2, 8).toUpperCase(),
-                payment_mode: 'BULK',
-                max_members: 5
-            }).select().single();
-            if (createErr) throw createErr;
+
+            // 1. Create Team using Server Action (Ensures Sequential ID)
+            // Using 'BULK' payment mode and max_members 5 (Admin override)
+            const team = await createTeam(name, admin.id, 'BULK', 5);
 
             // 2. Add members
-            const { error: addErr } = await supabase.from('users').update({ team_id: team.id }).in('id', selectedUsers);
-            if (addErr) throw addErr;
+            const [firstId, ...restIds] = selectedUsers;
+
+            // First user is LEADER
+            const { error: leaderErr } = await supabase
+                .from('users')
+                .update({ team_id: team.id, role: 'LEADER' })
+                .eq('id', firstId);
+            if (leaderErr) throw leaderErr;
+
+            // Others are MEMBERS
+            if (restIds.length > 0) {
+                const { error: memberErr } = await supabase
+                    .from('users')
+                    .update({ team_id: team.id, role: 'MEMBER' })
+                    .in('id', restIds);
+                if (memberErr) throw memberErr;
+            }
 
             setSelectedUsers([]);
             setTeamViewMode('ALL'); // Show new squad
             fetchAllData();
+            alert(`Squad "${name}" formed successfully with Team # ${team.team_number || 'Generated'}`);
         } catch (err: any) { alert(err.message); } finally { setLoading(false); }
     };
 
@@ -1126,7 +1179,6 @@ export default function MainDashboard() {
         if (!regNo) return;
 
         try {
-            setLoading(true);
             const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(regNo) || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(regNo);
 
             let query = supabase.from("users").select("*, squad:teams!team_id(name, team_number)");
@@ -1212,8 +1264,6 @@ export default function MainDashboard() {
 
         } catch (err: any) {
             alert("Scan failed: " + err.message);
-        } finally {
-            setLoading(false);
         }
     };
 
@@ -1237,14 +1287,14 @@ export default function MainDashboard() {
                             <div className="text-[10px] text-orange-500 font-bold uppercase tracking-widest">Main Admin</div>
                         </div>
                     </div>
-                    <button onClick={() => setMobileMenuOpen(false)} className="lg:hidden text-white/40 hover:text-white">
+                    <button onClick={() => setMobileMenuOpen(false)} className="lg:hidden text-white/70 hover:text-white">
                         <X className="w-6 h-6" />
                     </button>
                 </div>
 
                 <nav className="flex-1 p-4 space-y-2">
                     <div className="space-y-1">
-                        <p className="text-[10px] uppercase font-bold text-white/20 mb-2 px-3 tracking-widest">Main Operations</p>
+                        <p className="text-[10px] uppercase font-bold text-white/50 mb-2 px-3 tracking-widest">Main Operations</p>
                         <NavItem icon={Users} label="Participants" active={activeTab === "USERS"} onClick={() => { setActiveTab("USERS"); setMobileMenuOpen(false); }} />
                         <NavItem icon={ShieldCheck} label="Verify Queue" active={activeTab === "VERIFY_QUEUE"} onClick={() => { setActiveTab("VERIFY_QUEUE"); setMobileMenuOpen(false); }} />
                         <NavItem icon={QrCode} label="Take Attendance" active={activeTab === "SCAN"} onClick={() => { setActiveTab("SCAN"); setMobileMenuOpen(false); }} />
@@ -1261,7 +1311,7 @@ export default function MainDashboard() {
                 <div className="p-4 border-t border-white/10">
                     <button
                         onClick={() => { adminLogout(); window.location.href = "/admin/login"; }}
-                        className="w-full flex items-center gap-3 p-3 text-white/40 hover:text-white hover:bg-white/5 rounded-xl transition-all"
+                        className="w-full flex items-center gap-3 p-3 text-white/70 hover:text-white hover:bg-white/5 rounded-xl transition-all"
                     >
                         <LogOut className="w-5 h-5" />
                         <span className="text-sm font-medium">Logout</span>
@@ -1271,61 +1321,66 @@ export default function MainDashboard() {
 
             {/* Main Content */}
             <main className="flex-1 overflow-y-auto">
-                <header className="h-20 border-b border-white/10 px-4 sm:px-8 flex items-center justify-between sticky top-0 bg-black/50 backdrop-blur-xl z-10">
-                    <div className="flex items-center gap-4 sm:gap-6">
-                        <button onClick={() => setMobileMenuOpen(true)} className="lg:hidden text-white/60 hover:text-white">
-                            <Menu className="w-6 h-6" />
-                        </button>
-                        <div>
-                            <h2 className="text-sm sm:text-xl font-bold truncate max-w-[150px] sm:max-w-none">
-                                {activeTab === "SCAN" ? "Attendance" : activeTab.replace('_', ' ')} Management
-                                <span className="hidden sm:inline-block text-[10px] text-orange-500 ml-2 border border-orange-500/20 px-2 py-0.5 rounded bg-orange-500/5">v2.1-SQUAD</span>
-                            </h2>
-                            {lastSynced && (
-                                <p className="text-[10px] text-white/20 font-mono uppercase tracking-widest hidden sm:block">
-                                    Last Sync: {lastSynced.toLocaleTimeString()}
-                                </p>
-                            )}
+                <header className="min-h-20 h-auto py-4 border-b border-white/10 px-4 sm:px-8 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 sticky top-0 bg-black/50 backdrop-blur-xl z-20">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 sm:gap-6 w-full lg:w-auto">
+                        <div className="flex items-center gap-4 w-full sm:w-auto justify-between sm:justify-start">
+                            <button onClick={() => setMobileMenuOpen(true)} className="lg:hidden text-white/60 hover:text-white">
+                                <Menu className="w-6 h-6" />
+                            </button>
+                            <div className="flex-1 sm:flex-none">
+                                <h2 className="text-sm sm:text-l font-bold truncate">
+                                    {activeTab === "SCAN" ? "Attendance" : activeTab.replace('_', ' ')}
+                                    <span className="hidden sm:inline-block text-[10px] text-orange-500 ml-2 border border-orange-500/20 px-2 py-0.5 rounded bg-orange-500/5">v2.1</span>
+                                </h2>
+                                {lastSynced && (
+                                    <p className="text-[9px] text-white/50 font-mono uppercase tracking-widest">
+                                        Synced: {lastSynced.toLocaleTimeString()}
+                                    </p>
+                                )}
+                            </div>
                         </div>
+
                         {activeTab === 'USERS' && (
-                            <div className="flex items-center gap-3">
-                                <div className="relative">
+                            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
+                                <div className="relative w-full sm:w-auto">
                                     <input
                                         type="text"
-                                        placeholder="Search name, reg, utr..."
+                                        placeholder="Search..."
                                         value={searchTerm}
                                         onChange={(e) => setSearchTerm(e.target.value)}
-                                        className="bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-xs w-64 outline-none focus:border-orange-500/50 transition-all font-mono"
+                                        className="bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-xs w-full sm:w-64 outline-none focus:border-orange-500/50 transition-all font-mono"
                                     />
                                     {searchTerm && (
-                                        <button onClick={() => setSearchTerm("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-white/20 hover:text-white font-bold text-lg">×</button>
+                                        <button onClick={() => setSearchTerm("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-white/50 hover:text-white font-bold text-lg">×</button>
                                     )}
                                 </div>
-                                <select
-                                    value={statusFilter}
-                                    onChange={(e) => setStatusFilter(e.target.value)}
-                                    className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs outline-none focus:border-orange-500/50 appearance-none text-white/60"
-                                >
-                                    <option value="ALL">All Status</option>
-                                    <option value="PENDING">Pending</option>
-                                    <option value="VERIFYING">Verifying</option>
-                                    <option value="APPROVED">Approved</option>
-                                    <option value="REJECTED">Rejected</option>
-                                </select>
-                                <select
-                                    value={memberTypeFilter}
-                                    onChange={(e) => setMemberTypeFilter(e.target.value as any)}
-                                    className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs outline-none focus:border-orange-500/50 appearance-none text-white/60"
-                                >
-                                    <option value="ALL">All Members</option>
-                                    <option value="SQUAD">Squad Only</option>
-                                    <option value="SOLO">Solo Only</option>
-                                </select>
+                                <div className="flex gap-2 w-full sm:w-auto">
+                                    <select
+                                        value={statusFilter}
+                                        onChange={(e) => setStatusFilter(e.target.value)}
+                                        className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs outline-none focus:border-orange-500/50 appearance-none text-white/60 flex-1 sm:flex-none"
+                                    >
+                                        <option value="ALL">All Status</option>
+                                        <option value="PENDING">Pending</option>
+                                        <option value="VERIFYING">Verifying</option>
+                                        <option value="APPROVED">Approved</option>
+                                        <option value="REJECTED">Rejected</option>
+                                    </select>
+                                    <select
+                                        value={memberTypeFilter}
+                                        onChange={(e) => setMemberTypeFilter(e.target.value as any)}
+                                        className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs outline-none focus:border-orange-500/50 appearance-none text-white/60 flex-1 sm:flex-none"
+                                    >
+                                        <option value="ALL">All Members</option>
+                                        <option value="SQUAD">Squad Only</option>
+                                        <option value="SOLO">Solo Only</option>
+                                    </select>
+                                </div>
                             </div>
                         )}
                     </div>
-                    <div className="flex gap-4">
-                        <button onClick={fetchAllData} title="Refresh" className="text-white/40 hover:text-white transition-colors">
+                    <div className="flex gap-3 w-full lg:w-auto justify-end">
+                        <button onClick={() => fetchAllData()} title="Refresh" className="text-white/70 hover:text-white transition-colors bg-white/5 p-2 rounded-lg border border-white/10">
                             <Activity className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
                         </button>
 
@@ -1333,12 +1388,12 @@ export default function MainDashboard() {
                             <div className="flex gap-2">
                                 <button
                                     onClick={handleUniversalExport}
-                                    className="flex items-center gap-2 bg-gradient-to-r from-green-500 to-emerald-600 border border-green-500/20 px-4 py-2 rounded-lg text-xs font-black text-white hover:opacity-90 transition-all uppercase tracking-widest shadow-[0_0_15px_rgba(34,197,94,0.3)]"
+                                    className="flex items-center gap-2 bg-gradient-to-r from-green-500 to-emerald-600 border border-green-500/20 px-3 py-2 rounded-lg text-[10px] font-black text-white hover:opacity-90 transition-all uppercase tracking-widest shadow-[0_0_15px_rgba(34,197,94,0.3)] whitespace-nowrap"
                                 >
-                                    <Download className="w-4 h-4" /> Master Roster (.XLSX)
+                                    <Download className="w-3 h-3" /> <span className="hidden sm:inline">Export</span>
                                 </button>
-                                <label className="flex items-center gap-2 bg-white/5 border border-white/10 px-4 py-2 rounded-lg text-xs font-bold hover:bg-white/10 transition-all cursor-pointer uppercase tracking-tighter opacity-50 hover:opacity-100">
-                                    <Upload className="w-4 h-4" /> Import
+                                <label className="flex items-center gap-2 bg-white/5 border border-white/10 px-3 py-2 rounded-lg text-[10px] font-bold hover:bg-white/10 transition-all cursor-pointer uppercase tracking-tighter opacity-70 hover:opacity-100 whitespace-nowrap">
+                                    <Upload className="w-3 h-3" /> <span className="hidden sm:inline">Imp</span>
                                     <input type="file" accept=".csv" onChange={handleImportCSV} className="hidden" />
                                 </label>
                             </div>
@@ -1347,9 +1402,9 @@ export default function MainDashboard() {
                         {activeTab !== 'USERS' && activeTab !== 'LOGS' && (
                             <button
                                 onClick={() => { setFormData({}); setShowModal(activeTab); }}
-                                className="flex items-center gap-2 bg-gradient-to-r from-orange-500 to-red-600 px-4 py-2 rounded-lg text-sm font-bold hover:opacity-90 transition-opacity"
+                                className="flex items-center gap-2 bg-gradient-to-r from-orange-500 to-red-600 px-4 py-2 rounded-lg text-xs font-bold hover:opacity-90 transition-opacity whitespace-nowrap"
                             >
-                                <Plus className="w-4 h-4" /> Add New
+                                <Plus className="w-4 h-4" /> Add <span className="hidden sm:inline">New</span>
                             </button>
                         )}
                     </div>
@@ -1361,7 +1416,7 @@ export default function MainDashboard() {
                         <div className="max-w-4xl mx-auto space-y-8">
                             <div className="text-center space-y-2">
                                 <h2 className="text-3xl font-black tracking-tighter uppercase italic">Attendance Protocol <span className="text-orange-500">v3.0</span></h2>
-                                <p className="text-white/40 text-[10px] font-black tracking-[0.2em] uppercase">Sector Attendance & Validation Subsystem</p>
+                                <p className="text-white/70 text-[10px] font-black tracking-[0.2em] uppercase">Sector Attendance & Validation Subsystem</p>
                             </div>
 
                             <div className="flex flex-col md:flex-row gap-8 items-start">
@@ -1374,7 +1429,7 @@ export default function MainDashboard() {
                                         </div>
                                         <div className="grid grid-cols-2 gap-4">
                                             <div className="space-y-1">
-                                                <label className="text-[9px] uppercase font-black text-white/20 ml-1">Event Date</label>
+                                                <label className="text-[9px] uppercase font-black text-white/50 ml-1">Event Date</label>
                                                 <input
                                                     type="date"
                                                     value={attendanceDate}
@@ -1383,7 +1438,7 @@ export default function MainDashboard() {
                                                 />
                                             </div>
                                             <div className="space-y-1">
-                                                <label className="text-[9px] uppercase font-black text-white/20 ml-1">Session Time</label>
+                                                <label className="text-[9px] uppercase font-black text-white/50 ml-1">Session Time</label>
                                                 <input
                                                     type="time"
                                                     value={attendanceTime}
@@ -1425,13 +1480,13 @@ export default function MainDashboard() {
                                                     </div>
                                                 ) : (
                                                     <div className="flex items-center gap-2 mt-1">
-                                                        <span className="text-[10px] font-black uppercase text-white/40">{scanResult.team}</span>
+                                                        <span className="text-[10px] font-black uppercase text-white/70">{scanResult.team}</span>
                                                         <span className="text-[10px] font-mono text-orange-500 bg-orange-500/10 px-2 rounded">{scanResult.team_number}</span>
                                                     </div>
                                                 )}
                                             </div>
                                             <div className="pt-2 border-t border-white/5 flex items-center justify-between">
-                                                <span className="text-[10px] font-bold text-white/20 uppercase">Status Code</span>
+                                                <span className="text-[10px] font-bold text-white/50 uppercase">Status Code</span>
                                                 <span className={`text-[10px] font-black ${scanResult.error ? 'text-red-400' : 'text-cyan-400'}`}>{scanResult.status}</span>
                                             </div>
                                         </motion.div>
@@ -1440,11 +1495,11 @@ export default function MainDashboard() {
                                     <div className="grid grid-cols-2 gap-4">
                                         <div className="bg-white/5 border border-white/10 p-5 rounded-3xl text-center">
                                             <div className="text-xl font-black text-white">{data.users.filter((u: any) => u.is_present).length}</div>
-                                            <div className="text-[8px] text-white/20 uppercase font-black tracking-widest mt-1">Verified Entrants</div>
+                                            <div className="text-[8px] text-white/50 uppercase font-black tracking-widest mt-1">Verified Entrants</div>
                                         </div>
                                         <div className="bg-white/5 border border-white/10 p-5 rounded-3xl text-center">
                                             <div className="text-xl font-black text-white/10">{data.users.filter((u: any) => !u.is_present && u.status === 'APPROVED').length}</div>
-                                            <div className="text-[8px] text-white/20 uppercase font-black tracking-widest mt-1">Pending Entry</div>
+                                            <div className="text-[8px] text-white/50 uppercase font-black tracking-widest mt-1">Pending Entry</div>
                                         </div>
                                     </div>
                                 </div>
@@ -1480,8 +1535,8 @@ export default function MainDashboard() {
 
                                     <div className="bg-white/5 border border-white/10 p-6 rounded-3xl space-y-4">
                                         <div className="flex items-center justify-between">
-                                            <span className="text-[10px] font-black uppercase tracking-widest text-white/40">Recent Activity Feed</span>
-                                            <Clock className="w-4 h-4 text-white/20" />
+                                            <span className="text-[10px] font-black uppercase tracking-widest text-white/70">Recent Activity Feed</span>
+                                            <Clock className="w-4 h-4 text-white/50" />
                                         </div>
                                         <div className="space-y-3">
                                             {recentScans.length === 0 ? (
@@ -1496,7 +1551,7 @@ export default function MainDashboard() {
                                                     >
                                                         <div>
                                                             <div className="text-[10px] font-black text-white uppercase">{s.name}</div>
-                                                            <div className="text-[8px] text-white/20 uppercase font-bold">{s.team}</div>
+                                                            <div className="text-[8px] text-white/50 uppercase font-bold">{s.team}</div>
                                                         </div>
                                                         <div className="text-[9px] font-mono text-cyan-500">{s.time}</div>
                                                     </motion.div>
@@ -1514,11 +1569,11 @@ export default function MainDashboard() {
                             <div className="flex justify-between items-center mb-2">
                                 <div>
                                     <h2 className="text-xl font-black tracking-tight">VERIFICATION COMMAND CENTER</h2>
-                                    <p className="text-[10px] text-white/40 font-mono uppercase tracking-widest mt-1">Grouped Verification Protocol</p>
+                                    <p className="text-[10px] text-white/70 font-mono uppercase tracking-widest mt-1">Grouped Verification Protocol</p>
                                 </div>
                                 <div className="text-right">
                                     <div className="text-2xl font-black text-orange-500">{getAllParticipantGroups(data.users.filter((u: any) => ['PENDING', 'VERIFYING'].includes(u.status))).length}</div>
-                                    <div className="text-[8px] text-white/40 uppercase font-black tracking-widest">Active Groups</div>
+                                    <div className="text-[8px] text-white/70 uppercase font-black tracking-widest">Active Groups</div>
                                 </div>
                             </div>
 
@@ -1550,11 +1605,11 @@ export default function MainDashboard() {
                                                         )}
                                                     </div>
                                                     <h3 className="font-bold text-lg leading-tight truncate w-48">{group.teamName}</h3>
-                                                    <p className="text-[10px] font-mono text-white/40 mt-1">{group.teamNumber}</p>
+                                                    <p className="text-[10px] font-mono text-white/70 mt-1">{group.teamNumber}</p>
                                                 </div>
                                                 <div className="text-right">
                                                     <div className="text-lg font-black text-green-400">₹{totalAmount}</div>
-                                                    <div className="text-[9px] text-white/40 font-bold flex items-center justify-end gap-1">
+                                                    <div className="text-[9px] text-white/70 font-bold flex items-center justify-end gap-1">
                                                         <Users className="w-3 h-3" /> {group.count}
                                                     </div>
                                                     {group.members.some((m: any) => m.status === 'APPROVED') && (
@@ -1576,7 +1631,7 @@ export default function MainDashboard() {
                                                 {hasProof ? (
                                                     <Image src={proofSource.screenshot_url} alt="Proof" fill className="object-cover opacity-60 group-hover:opacity-100 transition-opacity" />
                                                 ) : (
-                                                    <div className="absolute inset-0 flex items-center justify-center text-[9px] font-black uppercase text-white/20 tracking-widest">
+                                                    <div className="absolute inset-0 flex items-center justify-center text-[9px] font-black uppercase text-white/50 tracking-widest">
                                                         No Proof Uploaded
                                                     </div>
                                                 )}
@@ -1588,7 +1643,7 @@ export default function MainDashboard() {
                                                 )}
                                             </div>
 
-                                            <div className="mt-4 flex items-center justify-between text-[10px] uppercase font-bold text-white/30">
+                                            <div className="mt-4 flex items-center justify-between text-[10px] uppercase font-bold text-white/50">
                                                 <span>Click to Verify</span>
                                                 <div className="w-6 h-6 rounded-full border border-white/10 flex items-center justify-center group-hover:bg-white group-hover:text-black transition-colors">
                                                     <ChevronRight className="w-3 h-3" />
@@ -1603,8 +1658,8 @@ export default function MainDashboard() {
                                         <div className="w-16 h-16 bg-white/5 rounded-full flex items-center justify-center mx-auto mb-4">
                                             <CheckCircle2 className="w-8 h-8 text-green-500/50" />
                                         </div>
-                                        <h3 className="text-xl font-bold text-white/40">All Clear</h3>
-                                        <p className="text-xs text-white/20 uppercase tracking-widest mt-2">No pending verifications</p>
+                                        <h3 className="text-xl font-bold text-white/70">All Clear</h3>
+                                        <p className="text-xs text-white/50 uppercase tracking-widest mt-2">No pending verifications</p>
                                     </div>
                                 )}
                             </div>
@@ -1616,13 +1671,13 @@ export default function MainDashboard() {
                             <div className="flex bg-white/5 p-1 rounded-xl border border-white/10 mb-6 w-fit">
                                 <button
                                     onClick={() => setParticipantViewMode('TABLE')}
-                                    className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${participantViewMode === 'TABLE' ? 'bg-orange-500 text-black shadow-[0_0_15px_rgba(249,115,22,0.3)]' : 'text-white/40 hover:text-white'}`}
+                                    className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${participantViewMode === 'TABLE' ? 'bg-orange-500 text-black shadow-[0_0_15px_rgba(249,115,22,0.3)]' : 'text-white/70 hover:text-white'}`}
                                 >
                                     Detailed Table
                                 </button>
                                 <button
                                     onClick={() => setParticipantViewMode('GROUPED')}
-                                    className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${participantViewMode === 'GROUPED' ? 'bg-orange-500 text-black shadow-[0_0_15px_rgba(249,115,22,0.3)]' : 'text-white/40 hover:text-white'}`}
+                                    className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${participantViewMode === 'GROUPED' ? 'bg-orange-500 text-black shadow-[0_0_15px_rgba(249,115,22,0.3)]' : 'text-white/70 hover:text-white'}`}
                                 >
                                     Squad/Solo Cards
                                 </button>
@@ -1658,13 +1713,13 @@ export default function MainDashboard() {
                                                             )}
                                                         </div>
                                                         <h3 className="font-bold text-lg leading-tight truncate w-48 text-white">{group.teamName}</h3>
-                                                        <p className="text-[10px] font-mono text-white/40 mt-1">{group.teamNumber}</p>
+                                                        <p className="text-[10px] font-mono text-white/70 mt-1">{group.teamNumber}</p>
                                                     </div>
                                                     <div className="text-right">
                                                         <div className={`text-lg font-black ${isAllPaid ? 'text-green-400' : 'text-yellow-400'}`}>
                                                             {isAllPaid ? 'PAID' : 'PENDING'}
                                                         </div>
-                                                        <div className="text-[9px] text-white/40 font-bold flex items-center justify-end gap-1">
+                                                        <div className="text-[9px] text-white/70 font-bold flex items-center justify-end gap-1">
                                                             <Users className="w-3 h-3" /> {group.count}
                                                         </div>
                                                     </div>
@@ -1674,13 +1729,13 @@ export default function MainDashboard() {
                                                     {hasProof ? (
                                                         <Image src={proofSource.screenshot_url} alt="Proof" fill className="object-cover opacity-60 group-hover:opacity-100 transition-opacity" />
                                                     ) : (
-                                                        <div className="absolute inset-0 flex items-center justify-center text-[9px] font-black uppercase text-white/20 tracking-widest text-center px-4">
+                                                        <div className="absolute inset-0 flex items-center justify-center text-[9px] font-black uppercase text-white/50 tracking-widest text-center px-4">
                                                             {isAllPaid ? 'Verification Complete' : 'Awaiting Proof Upload'}
                                                         </div>
                                                     )}
                                                 </div>
 
-                                                <div className="flex items-center justify-between text-[10px] uppercase font-bold text-white/30">
+                                                <div className="flex items-center justify-between text-[10px] uppercase font-bold text-white/50">
                                                     <span>View Squad Intel</span>
                                                     <div className="w-6 h-6 rounded-full border border-white/10 flex items-center justify-center group-hover:bg-white group-hover:text-black transition-colors">
                                                         <ChevronRight className="w-3 h-3" />
@@ -1696,7 +1751,7 @@ export default function MainDashboard() {
                                         <div className="bg-orange-500/10 border border-orange-500/20 p-4 mb-4 rounded-xl flex items-center justify-between sticky top-24 z-20 backdrop-blur-md">
                                             <div className="flex items-center gap-4">
                                                 <span className="font-bold text-orange-400 text-sm">{selectedUsers.length} Warriors Selected</span>
-                                                <button onClick={() => setSelectedUsers([])} className="text-[10px] text-white/40 hover:text-white uppercase font-bold">Clear Selection</button>
+                                                <button onClick={() => setSelectedUsers([])} className="text-[10px] text-white/70 hover:text-white uppercase font-bold">Clear Selection</button>
                                             </div>
                                             <div className="flex gap-2">
                                                 <button
@@ -1723,6 +1778,60 @@ export default function MainDashboard() {
                                             'Participant (Reg No)', 'Squad Info', 'Role', 'Contact (Email/Phone)', 'College', 'Bio (Yr/T/Br)', 'Status', 'Proof', 'Actions'
                                         ]}
                                         data={filteredUsers}
+                                        renderMobileCard={(u: any) => (
+                                            <div key={u.id} className="bg-white/5 border border-white/10 rounded-xl p-4 space-y-3 relative group overflow-hidden">
+                                                <div className="flex justify-between items-start">
+                                                    <div className="flex items-center gap-3">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={selectedUsers.includes(u.id)}
+                                                            onChange={(e) => {
+                                                                if (e.target.checked) setSelectedUsers([...selectedUsers, u.id]);
+                                                                else setSelectedUsers(selectedUsers.filter(id => id !== u.id));
+                                                            }}
+                                                            className="rounded border-white/20 bg-white/5 w-5 h-5"
+                                                        />
+                                                        <div>
+                                                            <div className="font-black text-white text-lg">{u.name}</div>
+                                                            <div className="text-xs text-white/70 font-mono uppercase">{u.reg_no}</div>
+                                                        </div>
+                                                    </div>
+                                                    <StatusBadge status={u.status} />
+                                                </div>
+
+                                                <div className="grid grid-cols-2 gap-2 text-xs">
+                                                    <div className="space-y-1">
+                                                        <div className="text-[10px] text-white/50 uppercase font-black">Squad</div>
+                                                        {u.squad ? (
+                                                            <div className="font-bold text-purple-400">{u.squad.name}</div>
+                                                        ) : u.pendingJoin ? (
+                                                            <div className="font-bold text-yellow-500 animate-pulse text-[10px]">
+                                                                JOINING {u.pendingJoin.teamName}
+                                                            </div>
+                                                        ) : (
+                                                            <div className="font-bold text-white/50">SOLO</div>
+                                                        )}
+                                                    </div>
+                                                    <div className="space-y-1">
+                                                        <div className="text-[10px] text-white/50 uppercase font-black">College</div>
+                                                        <div className="font-bold">{u.college || 'N/A'}</div>
+                                                    </div>
+                                                    <div className="space-y-1">
+                                                        <div className="text-[10px] text-white/50 uppercase font-black">Paid?</div>
+                                                        <div className={`font-bold ${u.status === 'APPROVED' ? 'text-green-400' : 'text-yellow-500'}`}>{u.status === 'APPROVED' ? 'YES' : 'NO'}</div>
+                                                    </div>
+                                                    <div className="space-y-1">
+                                                        <div className="text-[10px] text-white/50 uppercase font-black">Phone</div>
+                                                        <div className="font-mono text-white/60">{u.phone}</div>
+                                                    </div>
+                                                </div>
+
+                                                <div className="flex gap-2 pt-2 border-t border-white/5">
+                                                    <button onClick={() => { setFormData({}); setShowModal(activeTab); /* Just a placeholder for edit */ }} className="flex-1 py-2 bg-white/5 text-[10px] uppercase font-bold rounded hover:bg-white/10">Edit</button>
+                                                    <button onClick={() => deleteItem('users', u.id)} className="p-2 bg-red-500/10 text-red-500 rounded hover:bg-red-500 hover:text-white transition-colors"><Trash2 className="w-4 h-4" /></button>
+                                                </div>
+                                            </div>
+                                        )}
                                         renderRow={(u: any) => (
                                             <tr key={u.id} className={`border-b border-white/5 hover:bg-white/[0.01] ${selectedUsers.includes(u.id) ? 'bg-orange-500/5' : ''}`}>
                                                 <td className="py-4 px-4">
@@ -1761,7 +1870,7 @@ export default function MainDashboard() {
                                                             className="bg-black/50 border border-orange-500/50 rounded px-2 py-0.5 w-full mt-1 outline-none text-[10px] font-mono"
                                                         />
                                                     ) : (
-                                                        <div onDoubleClick={() => { setEditingId(u.id); setEditField('reg_no'); setEditValue(u.reg_no); }} className="text-[10px] text-white/40 uppercase font-mono cursor-pointer hover:text-orange-400">
+                                                        <div onDoubleClick={() => { setEditingId(u.id); setEditField('reg_no'); setEditValue(u.reg_no); }} className="text-[10px] text-white/70 uppercase font-mono cursor-pointer hover:text-orange-400">
                                                             {u.reg_no}
                                                         </div>
                                                     )}
@@ -1772,11 +1881,16 @@ export default function MainDashboard() {
                                                         <div className="max-w-[140px]">
                                                             <div className="text-[11px] font-black uppercase text-purple-400 truncate">{u.squad.name}</div>
                                                             <div className="flex items-center gap-2 mt-0.5">
-                                                                <span className="text-[9px] font-mono text-white/40">{u.squad.unique_code}</span>
+                                                                <span className="text-[9px] font-mono text-white/70">{u.squad.unique_code}</span>
                                                                 <span className={`text-[8px] font-bold px-1 rounded ${u.status === 'APPROVED' ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/20 text-yellow-500'}`}>
                                                                     {u.status === 'APPROVED' ? 'PAID' : 'PENDING'}
                                                                 </span>
                                                             </div>
+                                                        </div>
+                                                    ) : u.pendingJoin ? (
+                                                        <div className="max-w-[140px] opacity-80">
+                                                            <div className="text-[10px] font-black uppercase text-yellow-500 truncate italic">JOINING {u.pendingJoin.teamName}</div>
+                                                            <div className="text-[8px] font-mono text-yellow-500/40">{u.pendingJoin.teamCode}</div>
                                                         </div>
                                                     ) : (
                                                         <span className="text-[10px] font-black text-white/10 uppercase tracking-widest border border-white/5 px-2 py-0.5 rounded bg-white/[0.02]">
@@ -1786,7 +1900,7 @@ export default function MainDashboard() {
                                                 </td>
                                                 <td className="py-4 px-4">
                                                     <div className="flex flex-col gap-1">
-                                                        <span className={`text-[9px] font-black uppercase tracking-widest w-fit px-1.5 py-0.5 rounded ${u.squad ? 'bg-purple-500/10 text-purple-400' : 'text-white/20'}`}>
+                                                        <span className={`text-[9px] font-black uppercase tracking-widest w-fit px-1.5 py-0.5 rounded ${u.squad ? 'bg-purple-500/10 text-purple-400' : 'text-white/50'}`}>
                                                             {u.squad ? 'SQUAD' : 'SOLO'}
                                                         </span>
                                                         {editingId === u.id && editField === 'role' ? (
@@ -1805,7 +1919,7 @@ export default function MainDashboard() {
                                                                 {u.role === 'LEADER' ? (
                                                                     <span className="text-[8px] font-bold text-yellow-500 flex items-center gap-1"><Crown className="w-3 h-3" /> LEADER</span>
                                                                 ) : (
-                                                                    <span className="text-[8px] font-bold text-white/20 uppercase">MEMBER</span>
+                                                                    <span className="text-[8px] font-bold text-white/50 uppercase">MEMBER</span>
                                                                 )}
                                                             </div>
                                                         )}
@@ -1836,7 +1950,7 @@ export default function MainDashboard() {
                                                             className="bg-black/50 border border-orange-500/50 rounded px-2 py-1 w-full mt-1 outline-none"
                                                         />
                                                     ) : (
-                                                        <div onDoubleClick={() => { setEditingId(u.id); setEditField('phone'); setEditValue(u.phone); }} className="text-white/40 cursor-pointer hover:text-orange-400 mt-1">
+                                                        <div onDoubleClick={() => { setEditingId(u.id); setEditField('phone'); setEditValue(u.phone); }} className="text-white/70 cursor-pointer hover:text-orange-400 mt-1">
                                                             {u.phone}
                                                         </div>
                                                     )}
@@ -1938,10 +2052,10 @@ export default function MainDashboard() {
                                                             </div>
                                                         </a>
                                                     ) : (
-                                                        <span className="text-[10px] text-white/20">No Image</span>
+                                                        <span className="text-[10px] text-white/50">No Image</span>
                                                     )}
                                                 </td>
-                                                <td className="py-4 px-4 font-mono text-[10px] text-white/40">
+                                                <td className="py-4 px-4 font-mono text-[10px] text-white/70">
                                                     {editingId === u.id && editField === 'transaction_id' ? (
                                                         <input
                                                             autoFocus
@@ -1957,13 +2071,13 @@ export default function MainDashboard() {
                                                         </div>
                                                     )}
                                                 </td>
-                                                <td className="py-4 px-4 text-[10px] text-white/20 whitespace-nowrap">{new Date(u.created_at).toLocaleString()}</td>
+                                                <td className="py-4 px-4 text-[10px] text-white/50 whitespace-nowrap">{new Date(u.created_at).toLocaleString()}</td>
                                                 <td className="py-4 px-4 text-right">
                                                     <div className="flex items-center justify-end gap-2">
-                                                        <button onClick={() => setEmailModal({ userId: u.id, name: u.name })} className="p-2 text-white/20 hover:text-cyan-500 hover:bg-cyan-500/10 rounded-lg transition-all" title="Send Custom Email">
+                                                        <button onClick={() => setEmailModal({ userId: u.id, name: u.name })} className="p-2 text-white/50 hover:text-cyan-500 hover:bg-cyan-500/10 rounded-lg transition-all" title="Send Custom Email">
                                                             <Mail className="w-4 h-4" />
                                                         </button>
-                                                        <button onClick={() => setMovingUser(u)} className="p-2 text-white/20 hover:text-orange-500 hover:bg-orange-500/10 rounded-lg transition-all" title="Move to Squad">
+                                                        <button onClick={() => setMovingUser(u)} className="p-2 text-white/50 hover:text-orange-500 hover:bg-orange-500/10 rounded-lg transition-all" title="Move to Squad">
                                                             <Camera className="w-4 h-4" />
                                                         </button>
                                                         <button onClick={() => handleDeleteUser(u.id)} className="p-2 text-red-500/40 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all">
@@ -1988,7 +2102,7 @@ export default function MainDashboard() {
                                 <td className="py-4 px-4 text-xs uppercase font-bold text-orange-400">{a.role}</td>
                                 <td className="py-4 px-4">
                                     <button onClick={() => toggleStatus('admins', a.id, a.active)}>
-                                        {a.active ? <ToggleRight className="text-green-500" /> : <ToggleLeft className="text-white/20" />}
+                                        {a.active ? <ToggleRight className="text-green-500" /> : <ToggleLeft className="text-white/50" />}
                                     </button>
                                 </td>
                                 <td className="py-4 px-4">
@@ -2021,11 +2135,42 @@ export default function MainDashboard() {
                             <TableLayout
                                 headers={['Set Name', 'UPI ID', 'Amount', 'Usage/Limit', 'Status', 'Actions']}
                                 data={data.qr}
+                                renderMobileCard={(q: any) => (
+                                    <div key={q.id} className="bg-white/5 border border-white/10 rounded-xl p-4 space-y-3">
+                                        <div className="flex justify-between items-start">
+                                            <div>
+                                                <div className="font-bold text-sm tracking-tight">{q.upi_name || 'N/A'}</div>
+                                                <div className="text-[10px] text-orange-400 font-mono">{q.upi_id}</div>
+                                            </div>
+                                            <div className="text-xl font-black text-cyan-400">₹{q.amount}</div>
+                                        </div>
+                                        <div className="space-y-1">
+                                            <div className="flex justify-between text-[10px] font-bold text-white/70">
+                                                <span>Daily Usage</span>
+                                                <span>{q.today_usage || 0} / {q.daily_limit || 100}</span>
+                                            </div>
+                                            <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
+                                                <div className="h-full bg-cyan-500 transition-all" style={{ width: `${Math.min(((q.today_usage || 0) / (q.daily_limit || 100)) * 100, 100)}%` }} />
+                                            </div>
+                                        </div>
+                                        <div className="flex justify-between items-center pt-2 border-t border-white/5">
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-[10px] uppercase font-bold text-white/50">Active Status</span>
+                                                <button onClick={() => toggleStatus('qr_codes', q.id, q.active)}>
+                                                    {q.active ? <ToggleRight className="text-green-500 w-6 h-6" /> : <ToggleLeft className="text-white/50 w-6 h-6" />}
+                                                </button>
+                                            </div>
+                                            <button onClick={() => deleteItem('qr_codes', q.id)} className="p-2 bg-red-500/10 text-red-500 rounded hover:bg-red-500 hover:text-white transition-colors">
+                                                <Trash2 className="w-4 h-4" />
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
                                 renderRow={(q: any) => (
                                     <tr key={q.id} className="border-b border-white/5 hover:bg-white/[0.01]">
                                         <td className="py-4 px-4">
                                             <div className="font-bold text-sm tracking-tight">{q.upi_name || 'N/A'}</div>
-                                            <div className="text-[9px] text-white/30 uppercase font-mono tracking-tighter truncate max-w-[150px]">{q.id}</div>
+                                            <div className="text-[9px] text-white/50 uppercase font-mono tracking-tighter truncate max-w-[150px]">{q.id}</div>
                                         </td>
                                         <td className="py-4 px-4 font-mono text-xs text-orange-400">{q.upi_id}</td>
                                         <td className="py-4 px-4 font-black text-cyan-400">₹{q.amount}</td>
@@ -2037,7 +2182,7 @@ export default function MainDashboard() {
                                         </td>
                                         <td className="py-4 px-4">
                                             <button onClick={() => toggleStatus('qr_codes', q.id, q.active)} className="transition-transform active:scale-90">
-                                                {q.active ? <ToggleRight className="text-green-500 w-6 h-6" /> : <ToggleLeft className="text-white/20 w-6 h-6" />}
+                                                {q.active ? <ToggleRight className="text-green-500 w-6 h-6" /> : <ToggleLeft className="text-white/50 w-6 h-6" />}
                                             </button>
                                         </td>
                                         <td className="py-4 px-4">
@@ -2056,19 +2201,19 @@ export default function MainDashboard() {
                             <div className="flex justify-between items-center mb-6 px-1">
                                 <div>
                                     <h2 className="text-xl font-black tracking-tight text-white uppercase italic">Squad Command Center <span className="text-[10px] not-italic text-orange-500 ml-2 border border-orange-500/20 px-2 py-0.5 rounded bg-orange-500/5">v2.1-SQUAD</span></h2>
-                                    <p className="text-[10px] text-white/40 font-bold uppercase tracking-widest pl-0.5">Manage Legions & Solo Warriors</p>
+                                    <p className="text-[10px] text-white/70 font-bold uppercase tracking-widest pl-0.5">Manage Legions & Solo Warriors</p>
                                 </div>
                                 <div className="flex items-center gap-3">
                                     <div className="flex bg-white/5 p-1 rounded-xl border border-white/10 mr-2">
                                         <button
                                             onClick={() => setViewMode('VISUAL')}
-                                            className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${viewMode === 'VISUAL' ? 'bg-orange-500 text-black' : 'text-white/40 hover:text-white'}`}
+                                            className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${viewMode === 'VISUAL' ? 'bg-orange-500 text-black' : 'text-white/70 hover:text-white'}`}
                                         >
                                             Cards
                                         </button>
                                         <button
                                             onClick={() => setViewMode('GRID')}
-                                            className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${viewMode === 'GRID' ? 'bg-orange-500 text-black' : 'text-white/40 hover:text-white'}`}
+                                            className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${viewMode === 'GRID' ? 'bg-orange-500 text-black' : 'text-white/70 hover:text-white'}`}
                                         >
                                             Grid
                                         </button>
@@ -2101,13 +2246,14 @@ export default function MainDashboard() {
                                         <table className="w-full text-left border-collapse min-w-[1000px]">
                                             <thead className="bg-white/5">
                                                 <tr className="border-b border-white/10">
-                                                    <th className="p-4 text-[10px] uppercase tracking-widest text-white/40">Team Identity</th>
-                                                    <th className="p-4 text-[10px] uppercase tracking-widest text-white/40">Ref No</th>
-                                                    <th className="p-4 text-[10px] uppercase tracking-widest text-white/40">Squad Code</th>
-                                                    <th className="p-4 text-[10px] uppercase tracking-widest text-white/40">Type</th>
-                                                    <th className="p-4 text-[10px] uppercase tracking-widest text-white/40">Roster Snapshot</th>
-                                                    <th className="p-4 text-[10px] uppercase tracking-widest text-white/40">Payment Mode</th>
-                                                    <th className="p-4 text-[10px] uppercase tracking-widest text-white/40 text-right">Direct Commands</th>
+                                                    <th className="p-4 text-[10px] uppercase tracking-widest text-white/70">Team Identity</th>
+                                                    <th className="p-4 text-[10px] uppercase tracking-widest text-white/70">Ref No</th>
+                                                    <th className="p-4 text-[10px] uppercase tracking-widest text-white/70">Squad Code</th>
+                                                    <th className="p-4 text-[10px] uppercase tracking-widest text-white/70">Type</th>
+                                                    <th className="p-4 text-[10px] uppercase tracking-widest text-white/70">College</th>
+                                                    <th className="p-4 text-[10px] uppercase tracking-widest text-white/70">Roster Snapshot</th>
+                                                    <th className="p-4 text-[10px] uppercase tracking-widest text-white/70">Payment Mode</th>
+                                                    <th className="p-4 text-[10px] uppercase tracking-widest text-white/70 text-right">Direct Commands</th>
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y divide-white/5">
@@ -2133,7 +2279,7 @@ export default function MainDashboard() {
                                                                             {team.name}
                                                                         </div>
                                                                     )}
-                                                                    <div className="text-[9px] text-white/20 font-mono italic max-w-[150px] truncate" title={team.id}>UUID: {team.id.split('-')[0]}...</div>
+                                                                    <div className="text-[9px] text-white/50 font-mono italic max-w-[150px] truncate" title={team.id}>UUID: {team.id.split('-')[0]}...</div>
                                                                 </div>
                                                             </div>
                                                         </td>
@@ -2153,15 +2299,37 @@ export default function MainDashboard() {
                                                                     className="bg-black/50 border border-orange-500/50 rounded px-2 py-1 w-24 outline-none font-mono text-xs text-orange-400"
                                                                 />
                                                             ) : (
-                                                                <span onDoubleClick={() => { if (!team.isVirtual) { setEditingId(team.id); setEditField('unique_code'); setEditValue(team.unique_code); } }} className={`font-mono text-xs text-orange-400 bg-orange-400/5 px-2 py-1 rounded border border-orange-400/10 ${!team.isVirtual ? 'cursor-pointer hover:border-orange-400' : ''}`}>
+                                                                <span
+                                                                    onClick={() => {
+                                                                        if (!team.isVirtual) {
+                                                                            navigator.clipboard.writeText(team.unique_code);
+                                                                            alert(`Code ${team.unique_code} copied to clipboard!`);
+                                                                        }
+                                                                    }}
+                                                                    onDoubleClick={() => { if (!team.isVirtual) { setEditingId(team.id); setEditField('unique_code'); setEditValue(team.unique_code); } }}
+                                                                    className={`font-mono text-xs text-orange-400 bg-orange-400/10 px-2 py-1 rounded border border-orange-400/20 ${!team.isVirtual ? 'cursor-pointer hover:border-orange-400 hover:text-orange-300' : ''}`}
+                                                                    title="Click to Copy"
+                                                                >
                                                                     {team.unique_code}
                                                                 </span>
                                                             )}
                                                         </td>
                                                         <td className="p-4">
-                                                            <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full ${team.isVirtual ? 'bg-white/5 text-white/40' : 'bg-purple-500/10 text-purple-400'}`}>
+                                                            <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full ${team.isVirtual ? 'bg-white/5 text-white/60' : 'bg-purple-500/10 text-purple-400'}`}>
                                                                 {team.isVirtual ? 'SOLO' : 'SQUAD'}
                                                             </span>
+                                                        </td>
+                                                        <td className="p-4">
+                                                            {(() => {
+                                                                const leader = team.members.find((m: any) => m.role === 'LEADER') || team.members[0];
+                                                                const isRgm = isRGM({ members: team.members });
+                                                                return (
+                                                                    <div className="flex flex-col gap-1">
+                                                                        <span className="text-[10px] font-bold text-white/80">{leader?.college || 'N/A'}</span>
+                                                                        {isRgm && <span className="text-[8px] font-black bg-orange-500 text-black px-1.5 py-0.5 rounded w-fit uppercase">RGM</span>}
+                                                                    </div>
+                                                                );
+                                                            })()}
                                                         </td>
                                                         <td className="p-4">
                                                             <div className="space-y-1">
@@ -2174,13 +2342,13 @@ export default function MainDashboard() {
                                                                     </div>
                                                                 ))}
                                                                 {team.members.length > 3 && (
-                                                                    <div className="text-[9px] text-white/30 italic pl-1">+ {team.members.length - 3} others</div>
+                                                                    <div className="text-[9px] text-white/50 italic pl-1">+ {team.members.length - 3} others</div>
                                                                 )}
                                                                 {team.members.length === 0 && (
                                                                     <span className="text-[9px] text-red-500/50 italic">No Active Members</span>
                                                                 )}
                                                             </div>
-                                                            <div className="mt-1.5 text-[9px] font-bold text-white/30 uppercase tracking-tighter border-t border-white/5 pt-1">{team.memberCount} / {team.max_members || 5} Units</div>
+                                                            <div className="mt-1.5 text-[9px] font-bold text-white/50 uppercase tracking-tighter border-t border-white/5 pt-1">{team.memberCount} / {team.max_members || 5} Units</div>
                                                         </td>
                                                         <td className="p-4">
                                                             <StatusBadge status={team.payment_mode} />
@@ -2222,14 +2390,14 @@ export default function MainDashboard() {
                             {teamViewMode === 'ALL' && data.teams.length === 0 && (
                                 <div className="py-20 text-center border-2 border-dashed border-white/5 rounded-3xl">
                                     <Users className="w-12 h-12 text-white/10 mx-auto mb-4" />
-                                    <p className="text-white/20 uppercase font-black tracking-widest text-sm">No Active Squads Deployed</p>
+                                    <p className="text-white/50 uppercase font-black tracking-widest text-sm">No Active Squads Deployed</p>
                                 </div>
                             )}
 
                             {teamViewMode === 'SOLO' && data.users.filter((u: any) => !u.team_id).length === 0 && (
                                 <div className="py-20 text-center border-2 border-dashed border-white/5 rounded-3xl">
                                     <ShieldCheck className="w-12 h-12 text-white/10 mx-auto mb-4" />
-                                    <p className="text-white/20 uppercase font-black tracking-widest text-sm">All Warriors Have Joined Legions</p>
+                                    <p className="text-white/50 uppercase font-black tracking-widest text-sm">All Warriors Have Joined Legions</p>
                                 </div>
                             )}
                         </div>
@@ -2238,19 +2406,42 @@ export default function MainDashboard() {
                     {activeTab === 'EMAILS' && <TableLayout
                         headers={['Account Info', 'Configuration', 'Status', 'Actions']}
                         data={data.emails}
+                        renderMobileCard={(e: any) => (
+                            <div key={e.id} className="bg-white/5 border border-white/10 rounded-xl p-4 space-y-3">
+                                <div className="flex items-center justify-between">
+                                    <div className="font-black text-sm text-white break-all">{e.email_address}</div>
+                                    <button onClick={() => toggleStatus('email_accounts', e.id, e.active)}>
+                                        {e.active ? <ToggleRight className="text-green-500 w-6 h-6" /> : <ToggleLeft className="text-white/50 w-6 h-6" />}
+                                    </button>
+                                </div>
+                                <div className="text-[10px] text-white/70 uppercase font-black">{e.sender_name || 'No Sender Name'}</div>
+                                <div className="flex items-center gap-2 text-xs font-mono text-cyan-400 bg-cyan-900/10 px-2 py-1 rounded border border-cyan-500/20 w-fit">
+                                    <ShieldCheck className="w-3 h-3" />
+                                    {e.smtp_host}:{e.smtp_port}
+                                </div>
+                                <div className="flex gap-2 pt-2 border-t border-white/5">
+                                    <button onClick={() => handleTestSMTP(e.id)} className="flex-1 py-2 bg-orange-500/10 text-orange-500 rounded hover:bg-orange-500 hover:text-white transition-all text-[10px] uppercase font-bold flex items-center justify-center gap-1">
+                                        Test Connection
+                                    </button>
+                                    <button onClick={() => deleteItem('email_accounts', e.id)} className="p-2 bg-red-500/10 text-red-500 rounded hover:bg-red-500 hover:text-white transition-colors">
+                                        <Trash2 className="w-4 h-4" />
+                                    </button>
+                                </div>
+                            </div>
+                        )}
                         renderRow={(e: any) => (
                             <tr key={e.id} className="border-b border-white/5 hover:bg-white/[0.01]">
                                 <td className="py-4 px-4">
                                     <div className="font-black text-sm text-white">{e.email_address}</div>
-                                    <div className="text-[10px] text-white/40 uppercase font-black">{e.sender_name || 'No Sender Name'}</div>
+                                    <div className="text-[10px] text-white/70 uppercase font-black">{e.sender_name || 'No Sender Name'}</div>
                                 </td>
                                 <td className="py-4 px-4">
                                     <div className="text-xs font-mono text-cyan-400">{e.smtp_host}:{e.smtp_port}</div>
-                                    <div className="text-[10px] text-white/20 uppercase font-bold">{e.smtp_port === 465 ? 'SSL/TLS' : 'STARTTLS'}</div>
+                                    <div className="text-[10px] text-white/50 uppercase font-bold">{e.smtp_port === 465 ? 'SSL/TLS' : 'STARTTLS'}</div>
                                 </td>
                                 <td className="py-4 px-4">
                                     <button onClick={() => toggleStatus('email_accounts', e.id, e.active)} className="transition-transform active:scale-90">
-                                        {e.active ? <ToggleRight className="text-green-500 w-6 h-6" /> : <ToggleLeft className="text-white/20 w-6 h-6" />}
+                                        {e.active ? <ToggleRight className="text-green-500 w-6 h-6" /> : <ToggleLeft className="text-white/50 w-6 h-6" />}
                                     </button>
                                 </td>
                                 <td className="py-4 px-4">
@@ -2270,6 +2461,24 @@ export default function MainDashboard() {
                     {activeTab === 'GROUPS' && <TableLayout
                         headers={['College', 'WhatsApp Link', 'Status', 'Actions']}
                         data={data.groups}
+                        renderMobileCard={(g: any) => (
+                            <div key={g.id} className="bg-white/5 border border-white/10 rounded-xl p-4 flex items-center justify-between">
+                                <div>
+                                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${g.college === 'RGM' ? 'bg-cyan-500/10 text-cyan-400' : 'bg-purple-500/10 text-purple-400'}`}>
+                                        {g.college}
+                                    </span>
+                                    <div className="mt-2 text-[10px] font-mono text-white/70 truncate max-w-[150px]">{g.whatsapp_link}</div>
+                                </div>
+                                <div className="flex items-center gap-3">
+                                    <button onClick={() => toggleStatus('group_links', g.id, g.active)}>
+                                        {g.active ? <ToggleRight className="text-green-500 w-6 h-6" /> : <ToggleLeft className="text-white/50 w-6 h-6" />}
+                                    </button>
+                                    <button onClick={() => deleteItem('group_links', g.id)} className="p-2 bg-red-500/10 text-red-500 rounded hover:bg-red-500 hover:text-white transition-colors">
+                                        <Trash2 className="w-4 h-4" />
+                                    </button>
+                                </div>
+                            </div>
+                        )}
                         renderRow={(g: any) => (
                             <tr key={g.id} className="border-b border-white/5">
                                 <td className="py-4 px-4">
@@ -2277,10 +2486,10 @@ export default function MainDashboard() {
                                         {g.college}
                                     </span>
                                 </td>
-                                <td className="py-4 px-4 text-xs font-mono text-white/40">{g.whatsapp_link}</td>
+                                <td className="py-4 px-4 text-xs font-mono text-white/70">{g.whatsapp_link}</td>
                                 <td className="py-4 px-4">
                                     <button onClick={() => toggleStatus('group_links', g.id, g.active)}>
-                                        {g.active ? <ToggleRight className="text-green-500" /> : <ToggleLeft className="text-white/20" />}
+                                        {g.active ? <ToggleRight className="text-green-500" /> : <ToggleLeft className="text-white/50" />}
                                     </button>
                                 </td>
                                 <td className="py-4 px-4">
@@ -2297,26 +2506,29 @@ export default function MainDashboard() {
                                     <div className="w-8 h-8 rounded-full bg-orange-500/10 flex items-center justify-center text-orange-500"><Activity className="w-4 h-4" /></div>
                                     <div>
                                         <p className="text-sm font-medium"><span className="text-orange-400">{log.admins?.username}</span> {log.action.replace('_', ' ').toLowerCase()} for <span className="text-cyan-400">{log.users?.name}</span></p>
-                                        <p className="text-[10px] text-white/20">{new Date(log.timestamp).toLocaleString()}</p>
+                                        <p className="text-[10px] text-white/50">{new Date(log.timestamp).toLocaleString()}</p>
                                     </div>
                                 </div>
                             </div>
                         ))}
                     </div>}
                 </div>
-            </main>
+            </main >
             {
                 showModal && (
                     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
                         <motion.div
                             initial={{ scale: 0.9, opacity: 0 }}
                             animate={{ scale: 1, opacity: 1 }}
-                            className="bg-white/10 border border-white/20 rounded-3xl p-8 max-w-md w-full shadow-2xl"
+                            className="bg-neutral-900 border border-white/20 rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl max-h-[90vh] flex flex-col"
                         >
-                            <h3 className="text-xl font-bold mb-6">
-                                {showModal === 'TEAM_DETAILS' ? 'SQUAD INTEL' : `Add ${showModal}`}
-                            </h3>
-                            <form onSubmit={handleAdd} className="space-y-4">
+                            <div className="flex items-center justify-between mb-6">
+                                <h3 className="text-xl font-bold uppercase italic tracking-tighter">
+                                    {showModal === 'TEAM_DETAILS' ? 'SQUAD INTEL' : `Add ${showModal}`}
+                                </h3>
+                                <button onClick={() => setShowModal(null)} className="p-2 hover:bg-white/5 rounded-lg text-white/40"><X className="w-5 h-5" /></button>
+                            </div>
+                            <form onSubmit={handleAdd} className="space-y-4 overflow-y-auto pr-2 custom-scrollbar">
                                 {showModal === 'ADMINS' && (
                                     <>
                                         <FormInput label="Username" onChange={v => setFormData({ ...formData, username: v })} />
@@ -2329,14 +2541,14 @@ export default function MainDashboard() {
                                             <button
                                                 type="button"
                                                 onClick={() => setFormData({ ...formData, bulk: true })}
-                                                className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${formData.bulk !== false ? 'bg-orange-500 text-black' : 'text-white/40 hover:text-white'}`}
+                                                className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${formData.bulk !== false ? 'bg-orange-500 text-black' : 'text-white/70 hover:text-white'}`}
                                             >
                                                 Bulk Set (5 QR)
                                             </button>
                                             <button
                                                 type="button"
                                                 onClick={() => setFormData({ ...formData, bulk: false })}
-                                                className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${formData.bulk === false ? 'bg-orange-500 text-black' : 'text-white/40 hover:text-white'}`}
+                                                className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${formData.bulk === false ? 'bg-orange-500 text-black' : 'text-white/70 hover:text-white'}`}
                                             >
                                                 Single QR
                                             </button>
@@ -2397,7 +2609,7 @@ export default function MainDashboard() {
                                 {editField === 'TEAM_MEMBERS' && (
                                     <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
                                         <div className="mb-4">
-                                            <div className="text-[10px] text-white/20 uppercase font-black tracking-widest mb-1">Squad ID Reference</div>
+                                            <div className="text-[10px] text-white/50 uppercase font-black tracking-widest mb-1">Squad ID Reference</div>
                                             <div className="text-xs font-mono text-orange-400 bg-orange-400/5 px-2 py-1 rounded border border-orange-400/10 inline-block">{editingId}</div>
                                         </div>
                                         {data.users.filter((u: any) => u.team_id === editingId).map((u: any) => (
@@ -2406,8 +2618,8 @@ export default function MainDashboard() {
                                                     <div className="w-10 h-10 rounded-full bg-cyan-500/10 flex items-center justify-center font-black text-xs text-cyan-400 border border-cyan-500/20 shadow-[0_0_10px_rgba(6,182,212,0.1)]">{u.name[0]}</div>
                                                     <div>
                                                         <div className="font-black text-sm uppercase text-white group-hover:text-cyan-400 transition-colors">{u.name}</div>
-                                                        <div className="text-[10px] text-white/40 tracking-wider font-mono">{u.reg_no} • {u.role || 'Member'}</div>
-                                                        <div className="text-[9px] text-white/20 mt-1 uppercase font-bold">{u.email}</div>
+                                                        <div className="text-[10px] text-white/70 tracking-wider font-mono">{u.reg_no} • {u.role || 'Member'}</div>
+                                                        <div className="text-[9px] text-white/50 mt-1 uppercase font-bold">{u.email}</div>
                                                     </div>
                                                 </div>
                                                 <div className="flex flex-col items-end gap-2">
@@ -2423,7 +2635,7 @@ export default function MainDashboard() {
                                         {data.users.filter((u: any) => u.team_id === editingId).length === 0 && (
                                             <div className="text-center py-12 border-2 border-dashed border-white/5 rounded-3xl">
                                                 <ShieldAlert className="w-8 h-8 text-white/10 mx-auto mb-2" />
-                                                <p className="text-white/20 uppercase font-black tracking-widest text-[10px]">No active units in sector</p>
+                                                <p className="text-white/50 uppercase font-black tracking-widest text-[10px]">No active units in sector</p>
                                             </div>
                                         )}
                                     </div>
@@ -2452,17 +2664,17 @@ export default function MainDashboard() {
                     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
                         <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-neutral-900 border border-white/10 p-8 rounded-3xl max-w-md w-full shadow-2xl">
                             <h3 className="text-xl font-black mb-2 uppercase italic tracking-tighter">Reassign Warrior</h3>
-                            <p className="text-white/40 text-[10px] uppercase font-bold mb-6 tracking-widest">Moving {movingUser.name} to new squad</p>
+                            <p className="text-white/70 text-[10px] uppercase font-bold mb-6 tracking-widest">Moving {movingUser.name} to new squad</p>
 
                             <div className="space-y-4 max-h-[40vh] overflow-y-auto pr-2">
                                 <button onClick={() => handleMoveMember(movingUser.id, "")} className="w-full text-left p-4 bg-white/5 border border-white/10 rounded-xl hover:bg-red-500/10 hover:border-red-500/50 transition-all group">
                                     <div className="font-bold text-sm group-hover:text-red-500">REMOVE FROM ALL TEAMS</div>
-                                    <div className="text-[10px] text-white/20 uppercase">Convert to Independent Unit</div>
+                                    <div className="text-[10px] text-white/50 uppercase">Convert to Independent Unit</div>
                                 </button>
                                 {data.teams.map((t: any) => (
                                     <button key={t.id} onClick={() => handleMoveMember(movingUser.id, t.id)} className="w-full text-left p-4 bg-white/5 border border-white/10 rounded-xl hover:border-orange-500/50 transition-all">
                                         <div className="font-bold text-sm uppercase">{t.name}</div>
-                                        <div className="text-[10px] text-white/20 uppercase font-mono">{t.unique_code} • {t.memberCount}/{t.max_members} Units</div>
+                                        <div className="text-[10px] text-white/50 uppercase font-mono">{t.unique_code} • {t.memberCount}/{t.max_members} Units</div>
                                     </button>
                                 ))}
                             </div>
@@ -2507,14 +2719,14 @@ export default function MainDashboard() {
                             <div className="flex items-center justify-between">
                                 <div>
                                     <h3 className="text-xl font-black uppercase italic tracking-tighter">Custom Dispatch</h3>
-                                    <p className="text-white/40 text-[10px] uppercase font-bold tracking-widest">To: {emailModal.name}</p>
+                                    <p className="text-white/70 text-[10px] uppercase font-bold tracking-widest">To: {emailModal.name}</p>
                                 </div>
-                                <button onClick={() => setEmailModal(null)} className="p-2 hover:bg-white/5 rounded-lg text-white/40"><X className="w-5 h-5" /></button>
+                                <button onClick={() => setEmailModal(null)} className="p-2 hover:bg-white/5 rounded-lg text-white/70"><X className="w-5 h-5" /></button>
                             </div>
 
                             <div className="space-y-4">
                                 <div className="space-y-1">
-                                    <label className="text-[10px] uppercase font-bold text-white/30 ml-1">Subject Header</label>
+                                    <label className="text-[10px] uppercase font-bold text-white/50 ml-1">Subject Header</label>
                                     <input
                                         type="text"
                                         value={emailSubject}
@@ -2524,7 +2736,7 @@ export default function MainDashboard() {
                                     />
                                 </div>
                                 <div className="space-y-1">
-                                    <label className="text-[10px] uppercase font-bold text-white/30 ml-1">Transmission Content</label>
+                                    <label className="text-[10px] uppercase font-bold text-white/50 ml-1">Transmission Content</label>
                                     <textarea
                                         value={emailMessage}
                                         onChange={(e) => setEmailMessage(e.target.value)}
@@ -2571,7 +2783,7 @@ function NavItem({ icon: Icon, label, active, onClick }: { icon: any, label: str
     return (
         <button
             onClick={onClick}
-            className={`w-full flex items-center justify-between p-3 rounded-xl transition-all ${active ? "bg-gradient-to-r from-orange-500/20 to-transparent text-orange-400 border border-orange-500/20" : "text-white/40 hover:text-white hover:bg-white/5"
+            className={`w-full flex items-center justify-between p-3 rounded-xl transition-all ${active ? "bg-gradient-to-r from-orange-500/20 to-transparent text-orange-400 border border-orange-500/20" : "text-white/70 hover:text-white hover:bg-white/5"
                 }`}
         >
             <div className="flex items-center gap-3">
@@ -2586,10 +2798,10 @@ function NavItem({ icon: Icon, label, active, onClick }: { icon: any, label: str
 function FormFile({ label, file, onChange }: { label: string, file: File | null, onChange: (f: File | null) => void }) {
     return (
         <div className="space-y-1">
-            <label className="text-[10px] uppercase font-bold text-white/30 ml-1">{label}</label>
+            <label className="text-[10px] uppercase font-bold text-white/50 ml-1">{label}</label>
             <label className="flex items-center gap-3 w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 cursor-pointer hover:bg-white/10 transition-all overflow-hidden">
                 <Upload className="w-4 h-4 text-orange-500 shrink-0" />
-                <span className="text-sm text-white/40 truncate flex-1">
+                <span className="text-sm text-white/70 truncate flex-1">
                     {file ? file.name : "Select Image..."}
                 </span>
                 <input
@@ -2606,7 +2818,7 @@ function FormFile({ label, file, onChange }: { label: string, file: File | null,
 function FormInput({ label, type = "text", placeholder, value, onChange }: { label: string, type?: string, placeholder?: string, value?: string, onChange: (v: string) => void }) {
     return (
         <div className="space-y-1">
-            <label className="text-[10px] uppercase font-bold text-white/30 ml-1">{label}</label>
+            <label className="text-[10px] uppercase font-bold text-white/50 ml-1">{label}</label>
             <input
                 type={type}
                 placeholder={placeholder}
@@ -2621,7 +2833,7 @@ function FormInput({ label, type = "text", placeholder, value, onChange }: { lab
 function FormSelect({ label, options, onChange }: { label: string, options: string[], onChange: (v: string) => void }) {
     return (
         <div className="space-y-1">
-            <label className="text-[10px] uppercase font-bold text-white/30 ml-1">{label}</label>
+            <label className="text-[10px] uppercase font-bold text-white/50 ml-1">{label}</label>
             <select
                 onChange={(e) => onChange(e.target.value)}
                 className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 outline-none focus:border-orange-500/50 transition-all text-sm appearance-none"
@@ -2633,22 +2845,32 @@ function FormSelect({ label, options, onChange }: { label: string, options: stri
     );
 }
 
-function TableLayout({ headers, data, renderRow }: any) {
+function TableLayout({ headers, data, renderRow, renderMobileCard }: any) {
     return (
-        <div className="bg-white/[0.02] border border-white/10 rounded-2xl overflow-hidden">
-            <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse min-w-[800px]">
-                    <thead className="bg-white/5">
-                        <tr>
-                            {headers.map((h: any, i: number) => (
-                                <th key={i} className="p-4 text-[10px] uppercase tracking-widest text-white/40">{h}</th>
-                            ))}
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-white/5">
-                        {data.map(renderRow)}
-                    </tbody>
-                </table>
+        <div className="space-y-4">
+            {/* Mobile Card View */}
+            {renderMobileCard && (
+                <div className="flex flex-col gap-4 lg:hidden">
+                    {data.map((item: any) => renderMobileCard(item))}
+                </div>
+            )}
+
+            {/* Desktop Table View */}
+            <div className={`bg-white/[0.02] border border-white/10 rounded-2xl overflow-hidden ${renderMobileCard ? 'hidden lg:block' : ''}`}>
+                <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse min-w-[800px]">
+                        <thead className="bg-white/5">
+                            <tr>
+                                {headers.map((h: any, i: number) => (
+                                    <th key={i} className="p-4 text-[10px] uppercase tracking-widest text-white/70">{h}</th>
+                                ))}
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-white/5">
+                            {data.map(renderRow)}
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     );
@@ -2664,7 +2886,7 @@ function StatusBadge({ status }: { status: string }) {
         PENDING_PAY: "bg-yellow-500/10 text-yellow-500"
     };
     return (
-        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${styles[status] || "bg-white/5 text-white/40"}`}>
+        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${styles[status] || "bg-white/5 text-white/70"}`}>
             {status}
         </span>
     );
@@ -2694,22 +2916,31 @@ function SquadRow({ team, members, onRecruit, onKick, onEdit, onViewMember, onDe
                             />
                         )}
                         <div className="flex items-center gap-2 mt-0.5">
-                            <span className="text-[9px] text-white/30 font-mono tracking-widest uppercase">{team.unique_code}</span>
+                            <span className="text-[9px] text-white/50 font-mono tracking-widest uppercase">{team.unique_code}</span>
                             <span className="text-[9px] font-mono text-orange-500 bg-orange-500/10 px-2 rounded border border-orange-500/20">{team.team_number || '---'}</span>
                             {!isVirtual && (
                                 <button onClick={() => {
                                     if (confirm("Regen code?")) onEdit('unique_code', Math.random().toString(36).substring(2, 8).toUpperCase());
-                                }} className="opacity-0 group-hover:opacity-100 transition-opacity text-[8px] px-1 border border-white/10 rounded uppercase text-white/40 hover:text-white">Regen</button>
+                                }} className="opacity-0 group-hover:opacity-100 transition-opacity text-[8px] px-1 border border-white/10 rounded uppercase text-white/70 hover:text-white">Regen</button>
                             )}
                         </div>
                     </div>
                 </div>
                 {!isVirtual && (
                     <div className="flex items-center gap-2">
-                        <span className={`px-2 py-1 rounded text-[9px] font-black uppercase tracking-widest border transition-all ${team.members?.every((m: any) => m.status === 'APPROVED') ? 'bg-green-500/10 text-green-400 border-green-500/20' : 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20'}`}>
-                            {team.members?.every((m: any) => m.status === 'APPROVED') ? 'FULL PAID' : 'PENDING_MEMBERS'}
+                        <span className={`px-2 py-1 rounded text-[9px] font-black uppercase tracking-widest border transition-all ${team.members?.some((m: any) => m.status === 'UNPAID')
+                            ? 'bg-red-500/10 text-red-500 border-red-500/20'
+                            : team.members?.every((m: any) => m.status === 'APPROVED')
+                                ? 'bg-green-500/10 text-green-400 border-green-500/20'
+                                : 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20'
+                            }`}>
+                            {team.members?.some((m: any) => m.status === 'UNPAID')
+                                ? 'SQUAD INCOMPLETE'
+                                : team.members?.every((m: any) => m.status === 'APPROVED')
+                                    ? 'FULL PAID'
+                                    : 'VERIFYING UNITS'}
                         </span>
-                        <button onClick={() => onEdit('max_members', (team.max_members || 5) + 1)} className="p-2 text-white/20 hover:text-cyan-400 transition-colors" title="Add Vacant Slot">
+                        <button onClick={() => onEdit('max_members', (team.max_members || 5) + 1)} className="p-2 text-white/50 hover:text-cyan-400 transition-colors" title="Add Vacant Slot">
                             <PlusCircle className="w-4 h-4" />
                         </button>
                         <button onClick={() => onDelete(team.id)} className="p-2 text-white/10 hover:text-red-500 transition-colors">
@@ -2748,9 +2979,9 @@ function SquadSlot({ member, isLeader, isEmpty, onClick, onView, onKick, isVirtu
                 className={`h-24 rounded-xl border-2 border-dashed border-white/5 flex flex-col items-center justify-center gap-2 group/slot hover:border-white/20 hover:bg-white/5 transition-all ${isVirtual ? 'opacity-50' : ''}`}
             >
                 <div className="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center group-hover/slot:scale-110 transition-transform">
-                    <Plus className="w-4 h-4 text-white/20 group-hover/slot:text-white" />
+                    <Plus className="w-4 h-4 text-white/50 group-hover/slot:text-white" />
                 </div>
-                <span className="text-[9px] uppercase font-black tracking-widest text-white/20 group-hover/slot:text-white transition-colors">Recruit</span>
+                <span className="text-[9px] uppercase font-black tracking-widest text-white/50 group-hover/slot:text-white transition-colors">Recruit</span>
             </button>
         );
     }
@@ -2826,11 +3057,11 @@ function RecruitModal({ onClose, onSelect, users }: any) {
     return (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
             <div className="bg-neutral-900 border border-white/10 rounded-3xl w-full max-w-md max-h-[80vh] flex flex-col relative overflow-hidden">
-                <button onClick={onClose} className="absolute top-4 right-4 p-2 bg-white/5 hover:bg-white/10 rounded-full text-white/40 hover:text-white z-10"><X className="w-4 h-4" /></button>
+                <button onClick={onClose} className="absolute top-4 right-4 p-2 bg-white/5 hover:bg-white/10 rounded-full text-white/70 hover:text-white z-10"><X className="w-4 h-4" /></button>
 
                 <div className="p-6 border-b border-white/10 shrink-0">
                     <h2 className="text-xl font-black uppercase tracking-tight">Recruit Warrior</h2>
-                    <p className="text-[10px] text-white/40 font-bold uppercase tracking-widest mt-1">Select a Solo Warrior to joint this Squad</p>
+                    <p className="text-[10px] text-white/70 font-bold uppercase tracking-widest mt-1">Select a Solo Warrior to joint this Squad</p>
                     <div className="mt-4 relative">
                         <input
                             autoFocus

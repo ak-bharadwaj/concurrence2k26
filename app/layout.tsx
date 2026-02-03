@@ -51,11 +51,8 @@ export const metadata: Metadata = {
     description: "24-hour national level hackathon at RGMCET.",
   },
   icons: {
-    icon: [
-      { url: "/icon-light-32x32.png", media: "(prefers-color-scheme: light)" },
-      { url: "/icon-dark-32x32.png", media: "(prefers-color-scheme: dark)" },
-    ],
-    apple: "/apple-icon.png",
+    icon: "/college-logo.png",
+    apple: "/college-logo.png",
   },
   generator: 'Hackathon 2K26'
 };

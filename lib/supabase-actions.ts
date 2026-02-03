@@ -45,26 +45,13 @@ export async function createTeam(name: string, leaderId: string, paymentMode: "I
     let team = null;
     let attempts = 0;
 
-    // Fetch the latest team_number to increment
-    const { data: lastTeam, error: lastError } = await supabase
-        .from("teams")
-        .select("team_number")
-        .not("team_number", "is", null)
-        .order("team_number", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-    if (lastError) console.error("Error fetching last team number:", lastError);
-
-    let nextNum = 0;
-    if (lastTeam?.team_number) {
-        // Extract number from A000 format
-        const match = lastTeam.team_number.match(/A(\d+)/);
-        if (match) {
-            nextNum = parseInt(match[1]) + 10;
-        }
+    // Use Postgres RPC for atomic team number generation
+    const { data: team_number, error: rpcErr } = await supabase.rpc('generate_team_number');
+    if (rpcErr) {
+        console.error("Error generating team number via RPC:", rpcErr);
+        // Fallback logic if RPC fails (though it shouldn't if SQL is run)
+        throw new Error("Critical: Database sync required. Please run the fix script.");
     }
-    const team_number = `A${nextNum.toString().padStart(3, '0')}`;
 
     while (attempts < 5) {
         const unique_code = Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -76,7 +63,7 @@ export async function createTeam(name: string, leaderId: string, paymentMode: "I
                 leader_id: leaderId,
                 payment_mode: paymentMode,
                 max_members: maxMembers,
-                team_number // New column
+                team_number
             }])
             .select()
             .single();
@@ -253,29 +240,7 @@ export async function submitPayment(userId: string, paymentData: {
 
     if (error) throw error;
 
-    // 4. Check for accepted join requests and link team
-    const { data: joinReq } = await supabase
-        .from("join_requests")
-        .select("team_id")
-        .eq("user_id", userId)
-        .eq("status", "ACCEPTED")
-        .maybeSingle();
-
-    if (joinReq) {
-        await supabase
-            .from("users")
-            .update({ team_id: joinReq.team_id, role: "MEMBER" })
-            .eq("id", userId);
-
-        // Mark request as COMPLETED
-        await supabase
-            .from("join_requests")
-            .update({ status: "COMPLETED" })
-            .eq("user_id", userId)
-            .eq("team_id", joinReq.team_id);
-    }
-
-    // 3. If it's a BULK leader, push all members to PENDING for verification
+    // 4. If it's a BULK leader, push all members to PENDING for verification
     if (isBulkLeader) {
         // Only update members who are UNPAID or REJECTED
         await supabase
@@ -490,15 +455,66 @@ export async function getJoinRequests(teamId: string, status: 'PENDING' | 'ACCEP
 }
 
 export async function respondToJoinRequest(requestId: string, status: 'ACCEPTED' | 'REJECTED') {
-    // We NO LONGER update the users table here. 
-    // The user must PAY first, then they get added to the team.
-
-    const { error } = await supabase
+    // 1. Fetch request details
+    const { data: request, error: reqErr } = await supabase
         .from("join_requests")
-        .update({ status })
+        .select("*, users!user_id(name, email)")
+        .eq("id", requestId)
+        .single();
+
+    if (reqErr) throw reqErr;
+
+    if (status === 'ACCEPTED') {
+        // 2. Capacity Check
+        const { data: team } = await supabase.from("teams").select("max_members").eq("id", request.team_id).single();
+        const { count } = await supabase.from("users").select("*", { count: 'exact', head: true }).eq("team_id", request.team_id);
+
+        if (count !== null && count >= (team?.max_members || 5)) {
+            throw new Error("Cannot accept: Squad is already at maximum capacity.");
+        }
+
+        // 3. Update User
+        const { error: userErr } = await supabase
+            .from("users")
+            .update({ team_id: request.team_id, role: "MEMBER" })
+            .eq("id", request.user_id);
+
+        if (userErr) throw userErr;
+    }
+
+    // 4. Update Request Status
+    const { error: updateErr } = await supabase
+        .from("join_requests")
+        .update({ status: status === 'ACCEPTED' ? 'COMPLETED' : 'REJECTED' })
         .eq("id", requestId);
 
-    if (error) throw error;
+    if (updateErr) throw updateErr;
+
+    // 5. Send Notification Email
+    if (request?.users?.email) {
+        if (status === 'ACCEPTED') {
+            await sendEmail(
+                request.users.email,
+                "Welcome to the Squad! 🚀",
+                EMAIL_TEMPLATES.CUSTOM(
+                    request.users.name,
+                    "Squad Join Request Approved!",
+                    "Great news! The team leader has accepted your request. You are now officially part of the squad. Please login to your dashboard to sync with your team and complete any pending payments."
+                )
+            );
+        } else if (status === 'REJECTED') {
+            await sendEmail(
+                request.users.email,
+                "Update on your Squad Request",
+                EMAIL_TEMPLATES.CUSTOM(
+                    request.users.name,
+                    "Squad Request Declined",
+                    "The team leader has declined your request to join. Don't worry, you can still join other teams or participate independently."
+                )
+            );
+        }
+    }
+
     return true;
 }
 
