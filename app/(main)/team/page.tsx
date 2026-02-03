@@ -3,8 +3,9 @@
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { getJoinRequests, respondToJoinRequest, removeMemberFromTeam, leaveTeam, updateTeamSettings, addMemberToTeam, updateMemberDetails, deleteTeam } from "@/lib/supabase-actions";
-import { Loader2, Users, Crown, Copy, Check, UserMinus, LogOut, Settings, ArrowLeft, UserPlus, X, Edit3, Save, Trash2, ShieldCheck, Plus } from "lucide-react";
+import { getJoinRequests, respondToJoinRequest, removeMemberFromTeam, leaveTeam, updateTeamSettings, addMemberToTeam, updateMemberDetails, deleteTeam, submitPayment, getNextAvailableQR } from "@/lib/supabase-actions";
+import { Loader2, Users, Crown, Copy, Check, UserMinus, LogOut, Settings, ArrowLeft, UserPlus, X, Edit3, Save, Trash2, ShieldCheck, Plus, CreditCard, Upload } from "lucide-react";
+import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
 import { getFriendlyError } from "@/lib/error-handler";
 
@@ -14,6 +15,7 @@ export default function TeamPage() {
     const [isCreatingFirstSquad, setIsCreatingFirstSquad] = useState(false);
     const [members, setMembers] = useState<any[]>([]);
     const [joinRequests, setJoinRequests] = useState<any[]>([]);
+    const [acceptedRequests, setAcceptedRequests] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [copied, setCopied] = useState(false);
@@ -27,6 +29,11 @@ export default function TeamPage() {
     const [isSavingMember, setIsSavingMember] = useState(false);
     const [showAddMemberModal, setShowAddMemberModal] = useState(false);
     const [newMemberData, setNewMemberData] = useState({ name: "", email: "", reg_no: "", phone: "", branch: "", college: "RGM", year: "", other_college: "" });
+    const [showPaymentModal, setShowPaymentModal] = useState(false);
+    const [assignedQR, setAssignedQR] = useState<any>(null);
+    const [paymentProof, setPaymentProof] = useState<{ transaction_id: string; screenshot: File | null }>({ transaction_id: "", screenshot: null });
+    const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
+    const [paymentAmount, setPaymentAmount] = useState(800);
     const router = useRouter();
 
     const fetchTeamData = useCallback(async (silent: boolean = false) => {
@@ -77,8 +84,12 @@ export default function TeamPage() {
             setMembers(membersData || []);
 
             if (userData.role === "LEADER") {
-                const requests = await getJoinRequests(userData.team_id);
-                setJoinRequests(requests || []);
+                const [pReqs, aReqs] = await Promise.all([
+                    getJoinRequests(userData.team_id, 'PENDING'),
+                    getJoinRequests(userData.team_id, 'ACCEPTED')
+                ]);
+                setJoinRequests(pReqs || []);
+                setAcceptedRequests(aReqs || []);
             }
         } catch (err: any) {
             setError(getFriendlyError(err));
@@ -122,7 +133,7 @@ export default function TeamPage() {
         setTimeout(() => setCopied(false), 2000);
     };
 
-    const handleJoinRequest = async (requestId: string, action: 'APPROVED' | 'REJECTED') => {
+    const handleJoinRequest = async (requestId: string, action: 'ACCEPTED' | 'REJECTED') => {
         try {
             setProcessingId(requestId);
             await respondToJoinRequest(requestId, action);
@@ -285,6 +296,67 @@ export default function TeamPage() {
     };
 
 
+    const handlePaymentSubmit = async () => {
+        if (!paymentProof.transaction_id || !paymentProof.screenshot || !assignedQR) {
+            alert("Please provide Transaction ID and Screenshot!");
+            return;
+        }
+
+        try {
+            setIsSubmittingPayment(true);
+
+            // 1. Upload screenshot
+            const fileExt = paymentProof.screenshot.name.split('.').pop();
+            const fileName = `${user.id}_${Date.now()}.${fileExt}`;
+            const { data: uploadData, error: uploadErr } = await supabase.storage
+                .from('payment-proofs')
+                .upload(fileName, paymentProof.screenshot);
+
+            if (uploadErr) throw uploadErr;
+
+            const { data: { publicUrl } } = supabase.storage
+                .from('payment-proofs')
+                .getPublicUrl(fileName);
+
+            // 2. Submit payment action
+            await submitPayment(user.id, {
+                transaction_id: paymentProof.transaction_id,
+                screenshot_url: publicUrl,
+                assigned_qr_id: assignedQR.id
+            });
+
+            alert("Payment transmission encrypted and sent for verification! 🔒");
+            setShowPaymentModal(false);
+            setPaymentProof({ transaction_id: "", screenshot: null });
+            await fetchTeamData();
+        } catch (err: any) {
+            alert(getFriendlyError(err));
+        } finally {
+            setIsSubmittingPayment(false);
+        }
+    };
+
+    const openPaymentPortal = async () => {
+        try {
+            setLoading(true);
+            // Calculate amount: if BULK leader, count UNPAID members. If INDIVIDUAL, just 800.
+            let amount = 800;
+            if (team?.payment_mode === 'BULK' && isLeader) {
+                const unpaidCount = members.filter(m => m.status === 'UNPAID').length;
+                amount = unpaidCount * 800;
+                if (amount === 0) amount = 800; // Base case
+            }
+            setPaymentAmount(amount);
+            const qr = await getNextAvailableQR(amount);
+            setAssignedQR(qr);
+            setShowPaymentModal(true);
+        } catch (err: any) {
+            alert(getFriendlyError(err));
+        } finally {
+            setLoading(false);
+        }
+    };
+
     if (loading || (!team && !error && !isCreatingFirstSquad)) return <div className="min-h-screen flex items-center justify-center"><Loader2 className="w-8 h-8 text-cyan-500 animate-spin" /></div>;
 
     if (error) return (
@@ -407,8 +479,8 @@ export default function TeamPage() {
                                 Join Requests ({joinRequests.length})
                             </h3>
 
-                            <div className="max-h-[150px] overflow-y-auto scrollbar-hide space-y-3">
-                                {joinRequests.length > 0 ? joinRequests.map((req: any) => (
+                            <div className="max-h-[250px] overflow-y-auto scrollbar-hide space-y-3">
+                                {joinRequests.map((req: any) => (
                                     <div key={req.id} className="flex items-center justify-between p-4 bg-white/5 rounded-xl border border-white/10">
                                         <div>
                                             <p className="font-bold text-sm">{req.users.name}</p>
@@ -416,7 +488,7 @@ export default function TeamPage() {
                                         </div>
                                         <div className="flex gap-2">
                                             <button
-                                                onClick={() => handleJoinRequest(req.id, 'APPROVED')}
+                                                onClick={() => handleJoinRequest(req.id, 'ACCEPTED')}
                                                 disabled={processingId === req.id}
                                                 className="p-2 bg-green-500/10 text-green-500 rounded-lg hover:bg-green-500 hover:text-white transition-all disabled:opacity-50"
                                             >
@@ -431,14 +503,101 @@ export default function TeamPage() {
                                             </button>
                                         </div>
                                     </div>
-                                )) : (
+                                ))}
+
+                                {acceptedRequests.map((req: any) => (
+                                    <div key={req.id} className="flex items-center justify-between p-4 bg-green-500/5 rounded-xl border border-green-500/20">
+                                        <div>
+                                            <p className="font-bold text-sm text-green-400">{req.users.name}</p>
+                                            <p className="text-[9px] text-green-500/40 uppercase font-bold tracking-tighter italic">Accepted - Awaiting Payment</p>
+                                        </div>
+                                        <Clock className="w-4 h-4 text-green-500/40 animate-pulse" />
+                                    </div>
+                                ))}
+
+                                {joinRequests.length === 0 && acceptedRequests.length === 0 && (
                                     <div className="h-full flex items-center justify-center text-white/20 text-[10px] uppercase font-bold tracking-widest italic pt-4">
-                                        No pending requests
+                                        No active requests
                                     </div>
                                 )}
                             </div>
                         </motion.div>
                     </div>
+                )}
+
+                {/* Payment Required Warning */}
+                {user?.status === 'UNPAID' && (
+                    <motion.div
+                        initial={{ opacity: 0, y: -20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="mb-6 p-4 bg-red-500/20 border border-red-500/50 rounded-2xl flex items-center justify-between gap-4"
+                    >
+                        <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-full bg-red-500 flex items-center justify-center shadow-[0_0_15px_rgba(239,68,68,0.5)]">
+                                <CreditCard className="w-5 h-5 text-white" />
+                            </div>
+                            <div>
+                                <h4 className="text-sm font-black uppercase text-white tracking-widest">Entry Fee Required</h4>
+                                <p className="text-[10px] text-red-200 uppercase font-bold opacity-80">Your registration is inactive until the entry fee is transmitted and verified.</p>
+                            </div>
+                        </div>
+                        <button
+                            onClick={openPaymentPortal}
+                            className="px-4 py-2 bg-white text-black text-[10px] font-black uppercase rounded-lg hover:bg-neutral-200 transition-colors whitespace-nowrap"
+                        >
+                            Pay Now
+                        </button>
+                    </motion.div>
+                )}
+
+                {/* Payment Status & Actions */}
+                {!isCreatingFirstSquad && (
+                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="glass-card p-6 mb-6 border-green-500/20">
+                        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                            <div>
+                                <h3 className="text-xl font-bold flex items-center gap-2">
+                                    <CreditCard className="w-5 h-5 text-green-400" />
+                                    Squad Integrity & Payment
+                                </h3>
+                                <p className="text-xs text-white/40 mt-1 uppercase font-bold tracking-widest">
+                                    {team?.payment_mode === 'BULK'
+                                        ? "Bulk Payment Protocol: Leader manages all dues"
+                                        : "Individual Payment Protocol: Each warrior handles their own dues"}
+                                </p>
+                            </div>
+
+                            {/* Logic to show "Pay Now" */}
+                            {(user?.status === 'UNPAID' || (team?.payment_mode === 'BULK' && isLeader && members.some(m => m.status === 'UNPAID'))) && (
+                                <button
+                                    onClick={openPaymentPortal}
+                                    className="px-6 py-3 bg-green-500 text-black font-black rounded-xl text-[10px] uppercase hover:bg-green-400 transition-all shadow-[0_0_20px_rgba(34,197,94,0.3)] flex items-center gap-2"
+                                >
+                                    <Upload className="w-4 h-4" />
+                                    {user?.status === 'UNPAID' ? "Transmit My Entry Fee" : "Transmit Squad Dues"}
+                                </button>
+                            )}
+                        </div>
+
+                        {/* Summary of payment status */}
+                        <div className="mt-6 grid grid-cols-2 md:grid-cols-4 gap-4 pt-6 border-t border-white/5">
+                            <div className="text-center">
+                                <p className="text-[9px] uppercase font-black text-white/30 tracking-widest mb-1">Total Unit Size</p>
+                                <p className="text-xl font-black">{members.length}</p>
+                            </div>
+                            <div className="text-center">
+                                <p className="text-[9px] uppercase font-black text-white/30 tracking-widest mb-1">Verified Warriors</p>
+                                <p className="text-xl font-black text-green-400">{members.filter(m => m.status === 'APPROVED').length}</p>
+                            </div>
+                            <div className="text-center">
+                                <p className="text-[9px] uppercase font-black text-white/30 tracking-widest mb-1">Encryption Pending</p>
+                                <p className="text-xl font-black text-yellow-400">{members.filter(m => ['PENDING', 'VERIFYING'].includes(m.status)).length}</p>
+                            </div>
+                            <div className="text-center">
+                                <p className="text-[9px] uppercase font-black text-white/30 tracking-widest mb-1">Dues Outstanding</p>
+                                <p className="text-xl font-black text-red-500">{members.filter(m => m.status === 'UNPAID').length}</p>
+                            </div>
+                        </div>
+                    </motion.div>
                 )}
 
                 {/* Team Members */}
@@ -822,6 +981,120 @@ export default function TeamPage() {
                     </form>
                 </motion.div>
             )}
+            {/* Payment Modal */}
+            <AnimatePresence>
+                {showPaymentModal && (
+                    <div className="fixed inset-0 bg-black/90 backdrop-blur-2xl z-[150] flex items-center justify-center p-4">
+                        <motion.div
+                            initial={{ scale: 0.95, opacity: 0, y: 20 }}
+                            animate={{ scale: 1, opacity: 1, y: 0 }}
+                            exit={{ scale: 0.95, opacity: 0, y: 20 }}
+                            className="bg-neutral-900 border border-white/10 rounded-[2.5rem] p-8 max-w-lg w-full shadow-2xl relative overflow-hidden"
+                        >
+                            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-green-500 via-cyan-500 to-purple-500" />
+
+                            <div className="flex justify-between items-start mb-8">
+                                <div>
+                                    <h2 className="text-2xl font-black text-white uppercase italic tracking-tighter">Secure Transmission</h2>
+                                    <p className="text-[10px] text-white/40 uppercase font-bold tracking-widest mt-1">Payment Gateway Authorization</p>
+                                </div>
+                                <button onClick={() => setShowPaymentModal(false)} className="p-2 hover:bg-white/5 rounded-full transition-colors">
+                                    <X className="w-6 h-6 text-white/40" />
+                                </button>
+                            </div>
+
+                            <div className="space-y-6">
+                                {/* QR Section */}
+                                <div className="bg-black/40 rounded-3xl p-6 border border-white/5 text-center">
+                                    <p className="text-[10px] uppercase font-black text-white/30 tracking-widest mb-2">Amount to Transfer</p>
+                                    <p className="text-5xl font-black text-white tracking-tighter mb-6">₹{paymentAmount}</p>
+
+                                    <div className="bg-white p-3 rounded-2xl w-48 h-48 mx-auto mb-6 shadow-2xl">
+                                        {assignedQR ? (
+                                            <Image
+                                                src={assignedQR.qr_image_url}
+                                                alt="Payment QR"
+                                                width={200}
+                                                height={200}
+                                                className="w-full h-full object-contain"
+                                            />
+                                        ) : (
+                                            <div className="w-full h-full flex items-center justify-center bg-neutral-100 rounded-xl">
+                                                <Loader2 className="w-8 h-8 text-cyan-500 animate-spin" />
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    <div className="space-y-2">
+                                        <p className="text-xs font-black text-white/60">{assignedQR?.upi_name || "Syncing..."}</p>
+                                        <div
+                                            className="inline-flex items-center gap-2 bg-white/5 px-4 py-2 rounded-xl text-cyan-400 font-mono text-xs border border-white/10 cursor-pointer active:scale-95 transition-all"
+                                            onClick={() => {
+                                                if (assignedQR?.upi_id) {
+                                                    navigator.clipboard.writeText(assignedQR.upi_id);
+                                                    alert("UPI ID copied to clipboard!");
+                                                }
+                                            }}
+                                        >
+                                            {assignedQR?.upi_id || "..."} <Copy className="w-3 h-3" />
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Proof Submission */}
+                                <div className="space-y-4">
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-black uppercase text-white/30 ml-1">Transaction ID (UTR)</label>
+                                        <div className="relative">
+                                            <CreditCard className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-white/20" />
+                                            <input
+                                                value={paymentProof.transaction_id}
+                                                onChange={(e) => setPaymentProof({ ...paymentProof, transaction_id: e.target.value })}
+                                                placeholder="ENTER 12-DIGIT UTR..."
+                                                className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-12 pr-4 outline-none focus:border-green-500/50 transition-all font-mono tracking-widest"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-black uppercase text-white/30 ml-1">Proof of Payment</label>
+                                        <label className="h-32 border-2 border-dashed border-white/10 rounded-2xl flex flex-col items-center justify-center cursor-pointer hover:border-green-500/50 hover:bg-white/5 transition-all p-4 group">
+                                            {paymentProof.screenshot ? (
+                                                <div className="flex items-center gap-2 text-green-400 font-bold text-center text-xs">
+                                                    <ShieldCheck className="w-5 h-5" /> {paymentProof.screenshot.name}
+                                                </div>
+                                            ) : (
+                                                <>
+                                                    <Upload className="w-8 h-8 mb-2 text-white/20 group-hover:text-green-500 transition-colors" />
+                                                    <span className="text-[10px] uppercase font-black tracking-widest text-white/20 group-hover:text-white/60">Upload Authorization Screenshot</span>
+                                                </>
+                                            )}
+                                            <input
+                                                type="file"
+                                                className="hidden"
+                                                accept="image/*"
+                                                onChange={(e) => setPaymentProof({ ...paymentProof, screenshot: e.target.files?.[0] || null })}
+                                            />
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <button
+                                    onClick={handlePaymentSubmit}
+                                    disabled={isSubmittingPayment}
+                                    className="w-full py-5 bg-gradient-to-r from-green-600 to-cyan-600 text-black font-black uppercase tracking-widest rounded-2xl disabled:opacity-50 active:scale-[0.98] transition-all flex items-center justify-center gap-3 shadow-[0_0_30px_rgba(34,197,94,0.2)]"
+                                >
+                                    {isSubmittingPayment ? (
+                                        <><Loader2 className="w-5 h-5 animate-spin" /> Finalizing Entry...</>
+                                    ) : (
+                                        <><ShieldCheck className="w-5 h-5" /> Encrypt & Submit Proof</>
+                                    )}
+                                </button>
+                            </div>
+                        </motion.div>
+                    </div>
+                )}
+            </AnimatePresence>
         </div>
     );
 }

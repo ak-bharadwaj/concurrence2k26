@@ -6,12 +6,7 @@ import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
 import { Menu, X } from "lucide-react";
 
-const navLinks = [
-    { href: "/", label: "Home" },
-    { href: "/#phases", label: "Phases" },
-    { href: "/#judges", label: "Judges" },
-    { href: "/#prizes", label: "Prizes" },
-];
+const navLinks: { href: string; label: string }[] = [];
 
 export function GlassNavbar() {
     const [isOpen, setIsOpen] = useState(false);
@@ -30,7 +25,7 @@ export function GlassNavbar() {
                         <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-full overflow-hidden bg-white/5 flex items-center justify-center">
                             <Image
                                 src="/college-logo.png"
-                                alt="TechSprint Logo"
+                                alt="Hackathon Logo"
                                 width={36}
                                 height={36}
                                 className="w-7 h-7 sm:w-8 sm:h-8 object-contain"
@@ -40,7 +35,7 @@ export function GlassNavbar() {
                             className="text-xs sm:text-sm font-bold bg-gradient-to-r from-cyan-400 to-purple-400 bg-clip-text text-transparent"
                             style={{ fontFamily: "var(--font-orbitron), sans-serif" }}
                         >
-                            TECHSPRINT
+                            HACKATHON
                         </span>
                     </Link>
 
@@ -60,6 +55,12 @@ export function GlassNavbar() {
                         {/* Action Buttons */}
                         <div className="flex items-center gap-2 ml-3">
                             <Link
+                                href="https://rgm-hackathon2k26.vercel.app/"
+                                className="px-4 py-1.5 text-xs font-semibold text-white/70 hover:text-white bg-white/5 border border-white/10 rounded-full transition-all duration-300"
+                            >
+                                Home
+                            </Link>
+                            <Link
                                 href="/login"
                                 className="px-4 py-1.5 text-xs font-semibold text-white/70 hover:text-white bg-white/5 border border-white/10 rounded-full transition-all duration-300"
                             >
@@ -76,6 +77,12 @@ export function GlassNavbar() {
 
                     {/* Mobile: Actions + Menu */}
                     <div className="flex sm:hidden items-center gap-2">
+                        <Link
+                            href="https://rgm-hackathon2k26.vercel.app/"
+                            className="px-3 py-1.5 text-[10px] font-semibold text-white/70 bg-white/5 border border-white/10 rounded-full"
+                        >
+                            Home
+                        </Link>
                         <Link
                             href="/login"
                             className="px-3 py-1.5 text-[10px] font-semibold text-white/70 bg-white/5 border border-white/10 rounded-full"

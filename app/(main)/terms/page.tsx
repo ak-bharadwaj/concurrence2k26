@@ -22,7 +22,7 @@ export default function TermsPage() {
                     <div className="flex items-start gap-3 p-4 bg-cyan-500/10 border border-cyan-500/20 rounded-xl mb-6">
                         <AlertCircle className="w-5 h-5 text-cyan-400 flex-shrink-0 mt-0.5" />
                         <p className="text-sm text-cyan-400">
-                            By registering for TechSprint 2K26, you agree to these terms and conditions. Please read them carefully.
+                            By registering for Hackathon 2K26, you agree to these terms and conditions. Please read them carefully.
                         </p>
                     </div>
 
@@ -137,7 +137,7 @@ export default function TermsPage() {
                                 9. Contact Information
                             </h2>
                             <p>
-                                For questions or concerns about these terms, please contact us through the Support Center on your dashboard or email us at support@techsprint2k26.com
+                                For questions or concerns about these terms, please contact us through the Support Center on your dashboard or email us at support@hackathon2k26.com
                             </p>
                         </section>
                     </div>

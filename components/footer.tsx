@@ -21,155 +21,65 @@ const socialIcons = {
 };
 
 export function Footer() {
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const [isPaused, setIsPaused] = useState(false);
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
-
-  const handleInteraction = () => {
-    setIsPaused(true);
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => {
-      setIsPaused(false);
-    }, 3000); // Resume after 3s of no interaction
-  };
+  const devs = [
+    { name: "Akshith Bharadwaj ", email: "dornipaduakshith@gmail.com", linkedin: "https://linkedin.com/in/akshith-bharadwaj", github: "https://github.com/ak-bharadwaj" },
+    { name: "Dheeraj Gowd", email: "dheerajgowd777@gmail.com", linkedin: "https://linkedin.com/in/yaramala-dheeraj-gowd", github: "https://github.com/dheerajgowd-18" },
+  ];
 
   return (
     <footer className="border-t border-white/10 bg-black/50 backdrop-blur-xl">
-      <div className="container mx-auto px-4 py-10 sm:py-12">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
-          {/* Brand */}
-          <div className="col-span-2 md:col-span-1 space-y-4">
-            <Link href="/" className="inline-flex items-center gap-2">
-              <div className="w-10 h-10 rounded-full overflow-hidden bg-white/5 flex items-center justify-center">
+      <div className="container mx-auto px-4 py-12 sm:py-16">
+        <div className="flex flex-col lg:flex-row items-center justify-between gap-12 lg:gap-8">
+          {/* Brand Section */}
+          <div className="flex flex-col items-center lg:items-start space-y-4 max-w-sm text-center lg:text-left">
+            <Link href="/" className="inline-flex items-center gap-3">
+              <div className="w-12 h-12 rounded-2xl overflow-hidden bg-white/5 border border-white/10 flex items-center justify-center p-2 group transition-all hover:border-cyan-500/50 hover:bg-cyan-500/5">
                 <Image
                   src="/college-logo.png"
-                  alt="TechSprint Logo"
-                  width={40}
-                  height={40}
-                  className="w-9 h-9 object-contain"
+                  alt="Hackathon Logo"
+                  width={48}
+                  height={48}
+                  className="w-full h-full object-contain group-hover:scale-110 transition-transform duration-500"
                 />
               </div>
               <div>
                 <span
-                  className="block text-base font-bold bg-gradient-to-r from-cyan-400 to-purple-400 bg-clip-text text-transparent"
+                  className="block text-xl font-black bg-gradient-to-r from-cyan-400 via-purple-400 to-pink-400 bg-clip-text text-transparent tracking-tighter"
                   style={{ fontFamily: "var(--font-orbitron), sans-serif" }}
                 >
-                  TECHSPRINT
+                  HACKATHON
                 </span>
-                <span className="text-[10px] text-white/30">2K26</span>
+                <span className="text-xs font-bold text-white/30 tracking-[0.2em] uppercase">2K26 Edition</span>
               </div>
             </Link>
-            <p className="text-white/40 text-xs sm:text-sm leading-relaxed">
+            <p className="text-white/40 text-sm leading-relaxed font-medium">
               {techSprintInfo.tagline}
             </p>
-            <p className="text-white/30 text-xs">
-              {techSprintInfo.dates.start} - {techSprintInfo.dates.end}
+            <p className="text-white/20 text-[10px] uppercase font-bold tracking-widest flex items-center gap-2">
+              <MapPin className="w-3 h-3 text-cyan-400" /> {collegeInfo.shortName}, Nandyal
             </p>
           </div>
 
-          {/* Quick Links */}
-          <div>
-            <h3 className="font-semibold text-white text-sm mb-4">Quick Links</h3>
-            <ul className="space-y-2">
-              {quickLinks.map((link) => (
-                <li key={link.href}>
-                  <Link
-                    href={link.href}
-                    className="text-white/40 text-xs hover:text-cyan-400 transition-colors"
-                  >
-                    {link.label}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          {/* Contact */}
-          <div>
-            <h3 className="font-semibold text-white text-sm mb-4">Contact</h3>
-            <ul className="space-y-3">
-              <li className="flex items-start gap-2">
-                <MapPin className="w-3 h-3 text-cyan-400 mt-1 flex-shrink-0" />
-                <span className="text-white/40 text-xs">{collegeInfo.shortName}, Nandyal</span>
-              </li>
-              <li className="flex items-center gap-2">
-                <Phone className="w-3 h-3 text-cyan-400 flex-shrink-0" />
-                <span className="text-white/40 text-xs">{collegeInfo.phone}</span>
-              </li>
-              <li className="flex items-center gap-2">
-                <Mail className="w-3 h-3 text-cyan-400 flex-shrink-0" />
-                <span className="text-white/40 text-xs">{collegeInfo.email}</span>
-              </li>
-            </ul>
-          </div>
-
-          {/* Social */}
-          <div>
-            <h3 className="font-semibold text-white text-sm mb-4">Follow Us</h3>
-            <div className="flex gap-3">
-              {socialLinks.map((social) => {
-                const Icon = socialIcons[social.platform as keyof typeof socialIcons];
-                return Icon ? (
-                  <a
-                    key={social.platform}
-                    href={social.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="w-9 h-9 rounded-lg bg-white/[0.03] border border-white/[0.06] flex items-center justify-center hover:bg-cyan-500/10 hover:border-cyan-500/30 transition-colors group"
-                  >
-                    <Icon className="w-4 h-4 text-white/40 group-hover:text-cyan-400 transition-colors" />
-                  </a>
-                ) : null;
-              })}
-            </div>
-          </div>
-        </div>
-
-        {/* Developer Credits */}
-        <div className="mt-8 pt-6 border-t border-white/[0.06]">
-          {/* Title */}
-          <p className="text-center text-[10px] text-white/40 uppercase tracking-widest mb-4">
-            Developed by
-          </p>
-
-          {/* Scrollable Container - pause on hover/touch */}
-          <div
-            className="relative overflow-x-auto scrollbar-hide snap-x snap-mandatory pb-4"
-            onMouseEnter={() => setIsPaused(true)}
-            onMouseLeave={() => setIsPaused(false)}
-            onTouchStart={handleInteraction}
-            onScroll={handleInteraction}
-          >
-            {/* Scrollable track with auto-scroll - pauses on interaction */}
-            <div
-              ref={scrollRef}
-              className="flex gap-4 sm:gap-6 py-4 animate-scroll-slow"
-              style={{
-                animationPlayState: isPaused ? 'paused' : 'running',
-                width: 'max-content'
-              }}
-            >
-              {/* Duplicate devs for infinite scroll effect */}
-              {[...Array(6)].flatMap((_, repeatIndex) => [
-                { name: "Dheeraj Gowd", email: "dheerajgowd@example.com", linkedin: "https://linkedin.com/in/dheerajgowd", github: "https://github.com/dheerajgowd-18" },
-                { name: "Akshith", email: "akshith@example.com", linkedin: "https://linkedin.com/in/akshith", github: "https://github.com/akshith" },
-              ].map((dev) => ({ ...dev, key: `${repeatIndex}-${dev.name}` }))).map((dev) => (
+          {/* Developers Section */}
+          <div className="flex flex-col sm:flex-row items-center gap-4 w-full sm:w-auto">
+            <div className="hidden sm:block h-12 w-px bg-white/10 mx-4" />
+            <div className="flex flex-col sm:flex-row gap-4 w-full">
+              {devs.map((dev) => (
                 <div
-                  key={dev.key}
-                  className="flex items-center gap-6 px-8 py-5 rounded-2xl bg-white/[0.03] border border-white/[0.08] hover:border-cyan-500/50 hover:bg-cyan-500/5 hover:scale-105 transition-all duration-500 shrink-0 snap-center group"
+                  key={dev.name}
+                  className="flex flex-col p-6 rounded-2xl bg-white/[0.03] border border-white/[0.08] hover:border-cyan-500/50 hover:bg-cyan-500/[0.02] transition-all duration-500 group min-w-[200px]"
                 >
-                  {/* Name */}
-                  <span className="text-white text-base font-bold whitespace-nowrap group-hover:text-cyan-400 transition-colors">{dev.name}</span>
+                  <span className="text-[10px] text-white/20 uppercase font-black tracking-widest mb-1 group-hover:text-cyan-500/50 transition-colors">Developer</span>
+                  <span className="text-white text-lg font-black tracking-tight mb-4 group-hover:text-cyan-400 transition-colors">{dev.name}</span>
 
-                  {/* Social Links */}
-                  <div className="flex items-center gap-2">
-                    <a href={`mailto:${dev.email}`} className="w-8 h-8 rounded-lg flex items-center justify-center text-white/40 hover:text-cyan-400 hover:bg-cyan-400/10 transition-all" title="Email">
+                  <div className="flex items-center gap-3 mt-auto">
+                    <a href={`mailto:${dev.email}`} className="p-2 rounded-lg bg-white/5 text-white/40 hover:text-cyan-400 hover:bg-cyan-400/10 transition-all border border-white/5 hover:border-cyan-500/30">
                       <Mail className="w-4 h-4" />
                     </a>
-                    <a href={dev.linkedin} target="_blank" rel="noopener noreferrer" className="w-8 h-8 rounded-lg flex items-center justify-center text-white/40 hover:text-blue-400 hover:bg-blue-400/10 transition-all" title="LinkedIn">
+                    <a href={dev.linkedin} target="_blank" rel="noopener noreferrer" className="p-2 rounded-lg bg-white/5 text-white/40 hover:text-blue-400 hover:bg-blue-400/10 transition-all border border-white/5 hover:border-blue-500/30">
                       <Linkedin className="w-4 h-4" />
                     </a>
-                    <a href={dev.github} target="_blank" rel="noopener noreferrer" className="w-8 h-8 rounded-lg flex items-center justify-center text-white/40 hover:text-white hover:bg-white/10 transition-all" title="GitHub">
+                    <a href={dev.github} target="_blank" rel="noopener noreferrer" className="p-2 rounded-lg bg-white/5 text-white/40 hover:text-white hover:bg-white/10 transition-all border border-white/5 hover:border-white/20">
                       <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
                         <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z" />
                       </svg>
@@ -179,17 +89,14 @@ export function Footer() {
               ))}
             </div>
           </div>
+        </div>
 
-          {/* Copyright */}
-          <div className="mt-6 pt-4 border-t border-white/[0.04] flex flex-col sm:flex-row justify-between items-center gap-2 text-[10px] text-white/20">
-            <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-4 text-center sm:text-left">
-              <p>© 2026 TechSprint. {collegeInfo.department}</p>
-              <p className="hidden sm:block">•</p>
-              <p>{collegeInfo.name}</p>
-            </div>
-            <Link href="/admin" className="hover:text-cyan-400/50 transition-colors uppercase tracking-widest text-[9px] font-bold">
-              Admin Portal
-            </Link>
+        {/* Bottom Bar */}
+        <div className="mt-12 pt-8 border-t border-white/[0.05] flex flex-col sm:flex-row justify-between items-center gap-6">
+          <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-4 text-[10px] font-black uppercase tracking-[0.2em] text-white/20">
+            <p>© 2026 Hackathon • {collegeInfo.name}</p>
+            <span className="hidden sm:block h-3 w-px bg-white/10" />
+            <p className="text-cyan-500/40">{collegeInfo.department}</p>
           </div>
         </div>
       </div>

@@ -7,7 +7,7 @@ import { Menu, X, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 const navLinks = [
-  { href: "/", label: "Home" },
+  { href: "https://rgm-hackathon2k26.vercel.app/", label: "Home" },
   { href: "/events", label: "Events" },
   { href: "/#schedule", label: "Schedule" },
   { href: "/#faq", label: "FAQ" },
@@ -50,7 +50,7 @@ export function Navbar() {
 
         {/* Desktop Navigation */}
         <div className="hidden md:flex items-center gap-6">
-          {navLinks.slice(0, -2).map((link) => (
+          {navLinks.slice(1, -2).map((link) => (
             <Link
               key={link.href}
               href={link.href}
@@ -61,7 +61,7 @@ export function Navbar() {
             </Link>
           ))}
           <Button asChild variant="outline" className="border-white/20 hover:bg-white/5 text-white">
-            <Link href="/admin/login">Admin Portal</Link>
+            <Link href="https://rgm-hackathon2k26.vercel.app/">Home</Link>
           </Button>
           <Button asChild className="bg-gradient-to-r from-neon-cyan via-neon-blue to-neon-purple hover:opacity-90 text-white border-0 px-6">
             <Link href="/register">Register Now</Link>

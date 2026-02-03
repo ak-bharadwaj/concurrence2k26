@@ -3,7 +3,8 @@
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { Loader2, User, Users, CheckCircle, XCircle, Clock, LogOut, Ticket, Crown, MessageSquare, Send, ChevronRight, Copy, ShieldCheck, Plus, Sparkles } from "lucide-react";
+import { Loader2, User, Users, CheckCircle, XCircle, Clock, LogOut, Ticket, Crown, MessageSquare, Send, ChevronRight, Copy, ShieldCheck, Plus, Sparkles, Upload } from "lucide-react";
+import { submitPayment, getNextAvailableQR } from "@/lib/supabase-actions";
 import { motion, AnimatePresence } from "framer-motion";
 import { getFriendlyError } from "@/lib/error-handler";
 import { submitSupportTicket, getUserSupportTickets } from "@/lib/support-actions";
@@ -18,6 +19,13 @@ export default function DashboardPage() {
     const [ticketForm, setTicketForm] = useState({ type: "PAYMENT", description: "" });
     const [submittingTicket, setSubmittingTicket] = useState(false);
     const [debounceTimer, setDebounceTimer] = useState<any>(null);
+
+    // Payment State
+    const [showPaymentModal, setShowPaymentModal] = useState(false);
+    const [assignedQR, setAssignedQR] = useState<any>(null);
+    const [paymentData, setPaymentData] = useState({ transactionId: '', screenshot: '' });
+    const [paymentSubmitting, setPaymentSubmitting] = useState(false);
+
     const router = useRouter();
 
     const fetchDashboard = useCallback(async (silent: boolean = false) => {
@@ -110,6 +118,49 @@ export default function DashboardPage() {
             return () => { dashboardChannel.unsubscribe(); };
         }
     }, [user?.team_id, debouncedFetch]);
+
+    const handleInitiatePayment = async () => {
+        try {
+            setLoading(true);
+            let amount = 800;
+            // Check team mode
+            if (team?.payment_mode === 'BULK' && user.role === 'LEADER') {
+                amount = 800 * (team.members?.length || 1);
+            }
+            // Fetch QR for the calculated amount
+            const qr = await getNextAvailableQR(amount);
+            setAssignedQR(qr);
+            setShowPaymentModal(true);
+        } catch (err: any) {
+            alert(getFriendlyError(err));
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handlePaymentSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!paymentData.transactionId || !paymentData.screenshot) {
+            alert("Please provide both Transaction ID and Screenshot Link.");
+            return;
+        }
+        try {
+            setPaymentSubmitting(true);
+            await submitPayment(user.id, {
+                transaction_id: paymentData.transactionId,
+                screenshot_url: paymentData.screenshot,
+                assigned_qr_id: assignedQR?.id
+            });
+            setShowPaymentModal(false);
+            setPaymentData({ transactionId: '', screenshot: '' });
+            alert("Payment submitted successfully! Verification is now pending.");
+            fetchDashboard();
+        } catch (err: any) {
+            alert(getFriendlyError(err));
+        } finally {
+            setPaymentSubmitting(false);
+        }
+    };
 
     const handleLogout = () => {
         document.cookie = "student_session=; path=/; max-age=0;";
@@ -217,8 +268,26 @@ export default function DashboardPage() {
                                 <p className="text-sm font-medium text-white/50 max-w-lg leading-relaxed">
                                     {user.status === 'APPROVED' ? 'Your identity has been verified. You are authorized to enter the arena. Please keep your QR code ready.' :
                                         user.status === 'REJECTED' ? 'Your registration was flagged. Please contact support immediately for manual review.' :
-                                            'Our sentinels are verifying your payment details. This process typically takes 2-4 hours.'}
+                                            user.status === 'UNPAID' ? 'Your registration is incomplete. Please complete the payment to lock your slot.' :
+                                                'Our sentinels are verifying your payment details. This process typically takes 2-4 hours.'}
                                 </p>
+
+                                {user.status === 'UNPAID' && (
+                                    <div className="mt-6">
+                                        {team?.payment_mode === 'BULK' && user.role !== 'LEADER' ? (
+                                            <div className="px-6 py-3 bg-white/10 rounded-xl text-xs font-black uppercase tracking-widest text-white/60 border border-white/10">
+                                                Waiting for Captain Payment
+                                            </div>
+                                        ) : (
+                                            <button
+                                                onClick={handleInitiatePayment}
+                                                className="px-8 py-4 bg-white text-black font-black text-xs uppercase tracking-widest rounded-xl hover:bg-cyan-400 transition-all shadow-[0_0_20px_rgba(255,255,255,0.3)] flex items-center gap-2"
+                                            >
+                                                Initialize Payment Sequence <ChevronRight className="w-4 h-4" />
+                                            </button>
+                                        )}
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </motion.div>
@@ -266,6 +335,10 @@ export default function DashboardPage() {
                                     <div className="text-left">
                                         <p className="text-[9px] text-white/30 uppercase font-black tracking-widest">Registration ID</p>
                                         <p className="font-mono text-xl font-black text-cyan-400 tracking-wider">{user.reg_no}</p>
+                                    </div>
+                                    <div className="text-center">
+                                        <p className="text-[9px] text-white/30 uppercase font-black tracking-widest">Size</p>
+                                        <p className="font-mono text-xl font-black text-purple-400 tracking-wider">{user.tshirt_size || 'M'}</p>
                                     </div>
                                     <div className="text-right">
                                         <p className="text-[9px] text-white/30 uppercase font-black tracking-widest">Status</p>
@@ -477,6 +550,73 @@ export default function DashboardPage() {
                                     {submittingTicket ? <Loader2 className="w-5 h-5 animate-spin" /> : <><Send className="w-4 h-4" /> Dispatch Ticket</>}
                                 </button>
                             </form>
+                        </motion.div>
+                    </div>
+                )}
+            </AnimatePresence>
+
+            {/* Payment Modal */}
+            <AnimatePresence>
+                {showPaymentModal && (
+                    <div className="fixed inset-0 bg-black/90 backdrop-blur-xl z-[100] flex items-center justify-center p-4">
+                        <motion.div
+                            initial={{ scale: 0.9, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            exit={{ scale: 0.9, opacity: 0 }}
+                            className="bg-neutral-900 border border-white/10 rounded-[2.5rem] p-8 max-w-lg w-full shadow-2xl overflow-y-auto max-h-[90vh]"
+                        >
+                            <div className="flex items-center justify-between mb-6">
+                                <h2 className="text-2xl font-black text-white italic uppercase tracking-tighter">Secure Payment</h2>
+                                <button onClick={() => setShowPaymentModal(false)} className="text-white/40 hover:text-white"><XCircle className="w-6 h-6" /></button>
+                            </div>
+
+                            <div className="space-y-8">
+                                <div className="text-center space-y-4 bg-white/5 p-6 rounded-3xl border border-white/5">
+                                    <p className="text-[10px] font-black uppercase tracking-widest text-white/40">Scan to Pay</p>
+                                    <div className="text-4xl font-black text-white tracking-tighter">₹{assignedQR?.amount}</div>
+                                    <div className="w-full aspect-square relative bg-white rounded-2xl p-4 max-w-[200px] mx-auto overflow-hidden">
+                                        {assignedQR?.qr_image_url ? (
+                                            <img src={assignedQR.qr_image_url} alt="Payment QR" className="w-full h-full object-contain" />
+                                        ) : (
+                                            <div className="w-full h-full flex items-center justify-center text-black font-bold text-xs uppercase text-center">QR Loading...</div>
+                                        )}
+                                    </div>
+                                    <p className="text-[10px] text-cyan-400 font-mono">{assignedQR?.upi_id || "Loading UPI..."}</p>
+                                </div>
+
+                                <form onSubmit={handlePaymentSubmit} className="space-y-4">
+                                    <div className="space-y-1.5">
+                                        <label className="text-[10px] uppercase font-black text-white/30 tracking-widest pl-1">Transaction ID (UTR)</label>
+                                        <input
+                                            required
+                                            value={paymentData.transactionId}
+                                            onChange={(e) => setPaymentData({ ...paymentData, transactionId: e.target.value })}
+                                            className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 outline-none focus:border-cyan-500/50 transition-all font-mono text-sm text-white"
+                                            placeholder="Example: 403218123456"
+                                        />
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        <label className="text-[10px] uppercase font-black text-white/30 tracking-widest pl-1">Screenshot Link (Drive/Imgur)</label>
+                                        <div className="relative">
+                                            <Upload className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-white/20" />
+                                            <input
+                                                required
+                                                value={paymentData.screenshot}
+                                                onChange={(e) => setPaymentData({ ...paymentData, screenshot: e.target.value })}
+                                                className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-10 pr-4 outline-none focus:border-cyan-500/50 transition-all text-sm text-white placeholder:text-white/20"
+                                                placeholder="https://drive.google.com/..."
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <button
+                                        disabled={paymentSubmitting}
+                                        className="w-full py-4 bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-black rounded-xl text-xs uppercase hover:opacity-90 transition-all flex items-center justify-center gap-3 disabled:opacity-50 mt-4 shadow-[0_0_20px_rgba(6,182,212,0.4)]"
+                                    >
+                                        {paymentSubmitting ? <Loader2 className="w-5 h-5 animate-spin" /> : "Verify Transaction"}
+                                    </button>
+                                </form>
+                            </div>
                         </motion.div>
                     </div>
                 )}

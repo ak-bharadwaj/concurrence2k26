@@ -1,9 +1,17 @@
 import { NextResponse } from "next/server";
 import nodemailer from "nodemailer";
 import { supabase } from "@/lib/supabase";
+import { cookies } from "next/headers";
 
 export async function POST(req: Request) {
     try {
+        const cookieStore = await cookies();
+        const adminSession = cookieStore.get("admin_session")?.value;
+
+        if (!adminSession) {
+            return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+        }
+
         const { emailId, testTo } = await req.json();
 
         if (!emailId || !testTo) {
@@ -34,11 +42,11 @@ export async function POST(req: Request) {
 
         // Send test mail
         await transporter.sendMail({
-            from: `"${emailAcc.sender_name || 'TechSprint Admin'}" <${emailAcc.email_address}>`,
+            from: `"${emailAcc.sender_name || 'Hackathon Admin'}" <${emailAcc.email_address}>`,
             to: testTo,
-            subject: "🚀 TechSprint SMTP Connectivity Test",
+            subject: "🚀 Hackathon SMTP Connectivity Test",
             text: "Success! Your SMTP configuration is working correctly.",
-            html: "<b>Success!</b> Your TechSprint SMTP configuration is working correctly.",
+            html: "<b>Success!</b> Your Hackathon SMTP configuration is working correctly.",
         });
 
         return NextResponse.json({ success: true });

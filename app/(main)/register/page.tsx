@@ -56,7 +56,7 @@ const GlassNavbar = () => (
                 <div className="w-8 h-8 bg-gradient-to-br from-cyan-500 to-purple-600 rounded-lg flex items-center justify-center">
                     <Zap className="w-5 h-5 text-white" />
                 </div>
-                <span className="font-black tracking-tighter text-xl">TECHSPRINT <span className="text-cyan-400">2K26</span></span>
+                <span className="font-black tracking-tighter text-xl">HACKATHON <span className="text-cyan-400">2K26</span></span>
             </div>
             <button onClick={() => window.location.href = "/login"} className="text-xs font-bold uppercase tracking-widest text-white/40 hover:text-white transition-colors">Login</button>
         </div>
@@ -77,14 +77,14 @@ function RegisterPageContent() {
     // Main Registrant (Leader/Solo)
     const [formData, setFormData] = useState({
         name: "", reg_no: "", email: "", phone: "",
-        college: "RGM", otherCollege: "", branch: "", year: ""
+        college: "RGM", otherCollege: "", branch: "", year: "", tshirtSize: "M"
     });
 
     // Added Members (for Bulk/Squad Form flow)
     const [additionalMembers, setAdditionalMembers] = useState<any[]>([]);
     const [showAddMemberModal, setShowAddMemberModal] = useState(false);
     const [newMember, setNewMember] = useState({
-        name: "", reg_no: "", email: "", phone: "", college: "RGM", otherCollege: "", branch: "", year: ""
+        name: "", reg_no: "", email: "", phone: "", college: "RGM", otherCollege: "", branch: "", year: "", tshirtSize: "M"
     });
 
     // Database IDs
@@ -100,6 +100,7 @@ function RegisterPageContent() {
     const [searchedTeam, setSearchedTeam] = useState<any>(null);
     const [acceptedTerms, setAcceptedTerms] = useState(false);
     const [joinRequestSent, setJoinRequestSent] = useState(false);
+    const [joinRequestStatus, setJoinRequestStatus] = useState<'PENDING' | 'ACCEPTED' | 'REJECTED' | 'COMPLETED'>('PENDING');
 
     // Payment Info
     const [assignedQR, setAssignedQR] = useState<any>(null);
@@ -162,6 +163,28 @@ function RegisterPageContent() {
         };
     }, [userId, teamDetails, router]);
 
+    // 3. Joiner: Listen for Join Request Status Changes
+    useEffect(() => {
+        if (!userId || regMode !== 'SQUAD' || squadSubMode !== 'JOIN') return;
+
+        const requestSub = supabase
+            .channel(`join_request_status_${userId}`)
+            .on('postgres_changes', {
+                event: 'UPDATE',
+                schema: 'public',
+                table: 'join_requests',
+                filter: `user_id=eq.${userId}`
+            }, (payload) => {
+                setJoinRequestStatus(payload.new.status);
+                if (payload.new.status === 'REJECTED') {
+                    setError("Your join request was declined by the squad captain.");
+                }
+            })
+            .subscribe();
+
+        return () => { requestSub.unsubscribe(); };
+    }, [userId, regMode, squadSubMode]);
+
     // Leader: Listen for Team Member Updates (Real-time Squad Sync)
     useEffect(() => {
         if (!teamDetails?.id || regMode !== 'SQUAD') return;
@@ -206,7 +229,7 @@ function RegisterPageContent() {
         return () => { requestSub.unsubscribe(); };
     }, [teamDetails?.id, regMode, squadSubMode]);
 
-    const handleRespondToRequest = async (requestId: string, status: 'APPROVED' | 'REJECTED') => {
+    const handleRespondToRequest = async (requestId: string, status: 'ACCEPTED' | 'REJECTED') => {
         try {
             setLoading(true);
             await respondToJoinRequest(requestId, status);
@@ -222,6 +245,7 @@ function RegisterPageContent() {
             setLoading(true);
             const userParams = {
                 ...formData,
+                tshirt_size: formData.tshirtSize,
                 college: formData.college === "RGM" ? "RGM College" : formData.otherCollege,
                 role: (regMode === "SQUAD" && squadSubMode === "FORM") ? "LEADER" : "MEMBER"
             };
@@ -235,9 +259,10 @@ function RegisterPageContent() {
                 setStep(2); // Move to Solo Protocol (Consent)
             } else if (regMode === "SQUAD") {
                 if (squadSubMode === "FORM") {
-                    // Create Team and Link
-                    const team = await createTeam(teamName, "BULK", 5);
-                    await supabase.from("users").update({ team_id: team.id }).eq("id", user.id);
+                    // Create Team and Link (RGM Units limited to 4 members to allow 5th by Admin)
+                    const isRgm = userParams.college.toUpperCase().includes("RGM");
+                    const team = await createTeam(teamName, user.id, "BULK", isRgm ? 4 : 5);
+                    await supabase.from("users").update({ team_id: team.id, role: "LEADER" }).eq("id", user.id);
                     setTeamDetails(team);
                     setStep(4); // Move to Squad Hub
                 } else if (squadSubMode === "JOIN") {
@@ -279,8 +304,12 @@ function RegisterPageContent() {
     const handleAddMember = () => {
         if (!newMember.name || !newMember.reg_no) return;
         if (additionalMembers.length >= 4) return alert("Max 5 members allowed");
-        setAdditionalMembers([...additionalMembers, newMember]);
-        setNewMember({ name: "", reg_no: "", email: "", phone: "", college: "RGM", otherCollege: "", branch: "", year: "" });
+        const addedMember = {
+            ...newMember,
+            tshirt_size: newMember.tshirtSize
+        };
+        setAdditionalMembers([...additionalMembers, addedMember]);
+        setNewMember({ name: "", reg_no: "", email: "", phone: "", college: "RGM", otherCollege: "", branch: "", year: "", tshirtSize: "M" });
         setShowAddMemberModal(false);
     };
 
@@ -411,6 +440,12 @@ function RegisterPageContent() {
                                             <FormInput label="College Name" icon={ExternalLink} value={formData.otherCollege} onChange={(v: string) => setFormData({ ...formData, otherCollege: v })} placeholder="Your College" />
                                         )}
                                         <div className="space-y-1.5 flex flex-col">
+                                            <label className="text-[10px] uppercase font-black text-white/30 tracking-widest pl-1">Shirt Size</label>
+                                            <select value={formData.tshirtSize} onChange={(e) => setFormData({ ...formData, tshirtSize: e.target.value })} className="bg-white/5 border border-white/10 rounded-2xl py-3.5 px-4 outline-none focus:border-cyan-500/50 transition-all font-medium text-white text-sm">
+                                                {["XS", "S", "M", "L", "XL", "XXL"].map(s => <option key={s} value={s} className="bg-neutral-900">{s}</option>)}
+                                            </select>
+                                        </div>
+                                        <div className="space-y-1.5 flex flex-col">
                                             <label className="text-[10px] uppercase font-black text-white/30 tracking-widest pl-1">Branch</label>
                                             <select value={formData.branch} onChange={(e) => setFormData({ ...formData, branch: e.target.value })} className="bg-white/5 border border-white/10 rounded-2xl py-3.5 px-4 outline-none focus:border-cyan-500/50 transition-all font-medium text-white text-sm">
                                                 <option value="" className="bg-neutral-900">Select Branch</option>
@@ -517,6 +552,12 @@ function RegisterPageContent() {
                                             {["I", "II", "III", "IV"].map(y => <option key={y} value={y} className="bg-neutral-900">{y}</option>)}
                                         </select>
                                     </div>
+                                    <div className="space-y-1.5 flex flex-col">
+                                        <label className="text-[10px] uppercase font-black text-white/30 tracking-widest pl-1">Shirt Size</label>
+                                        <select value={formData.tshirtSize} onChange={(e) => setFormData({ ...formData, tshirtSize: e.target.value })} className="bg-white/5 border border-white/10 rounded-2xl py-3.5 px-4 outline-none focus:border-cyan-500/50 transition-all font-medium text-white text-sm">
+                                            {["XS", "S", "M", "L", "XL", "XXL"].map(s => <option key={s} value={s} className="bg-neutral-900">{s}</option>)}
+                                        </select>
+                                    </div>
                                 </div>
                                 {formData.college === "OTHERS" && (
                                     <FormInput label="College Name" icon={ExternalLink} value={formData.otherCollege} onChange={(v: string) => setFormData({ ...formData, otherCollege: v })} placeholder="Your College" />
@@ -590,7 +631,7 @@ function RegisterPageContent() {
                                                     </div>
                                                     <div className="flex gap-2">
                                                         <button onClick={() => handleRespondToRequest(req.id, 'REJECTED')} className="p-2 text-red-500 hover:bg-neutral-800 rounded-lg"><X className="w-4 h-4" /></button>
-                                                        <button onClick={() => handleRespondToRequest(req.id, 'APPROVED')} className="p-2 text-green-500 hover:bg-neutral-800 rounded-lg"><CheckCircle2 className="w-4 h-4" /></button>
+                                                        <button onClick={() => handleRespondToRequest(req.id, 'ACCEPTED')} className="p-2 text-green-500 hover:bg-neutral-800 rounded-lg"><CheckCircle2 className="w-4 h-4" /></button>
                                                     </div>
                                                 </div>
                                             ))}
@@ -600,8 +641,46 @@ function RegisterPageContent() {
                                     {squadSubMode === 'FORM' ? (
                                         <button onClick={handleFinalSquadSubmit} className="w-full py-4 bg-green-500 text-black font-black rounded-xl shadow-[0_0_30px_rgba(34,197,94,0.3)] uppercase text-sm tracking-widest">PROCEED TO CHECKOUT</button>
                                     ) : (
-                                        <div className="text-center p-4 bg-white/5 border border-dashed border-white/10 rounded-2xl text-white/40 text-[10px] font-black tracking-widest uppercase">
-                                            Waiting for Captain approval...
+                                        <div className="space-y-4">
+                                            {joinRequestStatus === 'PENDING' && (
+                                                <div className="text-center p-8 bg-white/5 border border-dashed border-white/10 rounded-3xl">
+                                                    <Loader2 className="w-10 h-10 text-purple-500 animate-spin mx-auto mb-4" />
+                                                    <p className="text-xs font-black tracking-widest uppercase text-white/40">Waiting for Captain approval...</p>
+                                                    <p className="text-[10px] text-white/20 mt-2">Request sent to {searchedTeam?.name}</p>
+                                                </div>
+                                            )}
+                                            {joinRequestStatus === 'ACCEPTED' && (
+                                                <div className="text-center p-8 bg-green-500/10 border border-green-500/20 rounded-3xl">
+                                                    <CheckCircle2 className="w-10 h-10 text-green-500 mx-auto mb-4" />
+                                                    <p className="text-xs font-black tracking-widest uppercase text-green-400">Request Approved!</p>
+                                                    <p className="text-[10px] text-green-500/60 mt-2 mb-6 uppercase font-bold">Secure your slot by transmitting the entry fee</p>
+                                                    <button
+                                                        onClick={async () => {
+                                                            try {
+                                                                setLoading(true);
+                                                                setFinalAmount(800);
+                                                                const qr = await getNextAvailableQR(800);
+                                                                setAssignedQR(qr);
+                                                                setStep(5);
+                                                            } catch (err: any) {
+                                                                setError(getFriendlyError(err));
+                                                            } finally {
+                                                                setLoading(false);
+                                                            }
+                                                        }}
+                                                        className="w-full py-4 bg-green-500 text-black font-black rounded-xl uppercase text-xs tracking-widest shadow-[0_0_20px_rgba(34,197,94,0.2)]"
+                                                    >
+                                                        Proceed to Payment
+                                                    </button>
+                                                </div>
+                                            )}
+                                            {joinRequestStatus === 'REJECTED' && (
+                                                <div className="text-center p-8 bg-red-500/10 border border-red-500/20 rounded-3xl">
+                                                    <X className="w-10 h-10 text-red-500 mx-auto mb-4" />
+                                                    <p className="text-xs font-black tracking-widest uppercase text-red-400">Request Declined</p>
+                                                    <button onClick={() => setStep(1)} className="mt-4 text-[10px] font-black uppercase text-white/40 hover:text-white underline tracking-tighter">Try another squad or go solo</button>
+                                                </div>
+                                            )}
                                         </div>
                                     )}
                                 </div>
@@ -665,7 +744,7 @@ function RegisterPageContent() {
                                     />
                                 </div>
                                 <span className="text-[10px] text-white/40 leading-relaxed group-hover:text-white/60 transition-colors">
-                                    I agree to the <a href="/terms" target="_blank" className="text-cyan-400 font-bold hover:underline">Terms & Conditions</a> and <a href="/faq" target="_blank" className="text-purple-400 font-bold hover:underline">Privacy Policy</a> of TechSprint 2K26. I understand that registration fee is non-refundable.
+                                    I agree to the <a href="/terms" target="_blank" className="text-cyan-400 font-bold hover:underline">Terms & Conditions</a> and <a href="/faq" target="_blank" className="text-purple-400 font-bold hover:underline">Privacy Policy</a> of Hackathon 2K26. I understand that registration fee is non-refundable.
                                 </span>
                             </label>
 
@@ -684,8 +763,29 @@ function RegisterPageContent() {
                             <button onClick={() => setShowAddMemberModal(false)} className="absolute top-6 right-6 p-2 text-white/40 hover:text-white bg-white/5 rounded-full"><X className="w-4 h-4" /></button>
                             <Header title="Add Member" subtitle="Legion Expansion" />
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 my-6">
-                                <FormInput label="Name" icon={User} value={newMember.name} onChange={(v: string) => setNewMember({ ...newMember, name: v })} placeholder="Satoshi" />
-                                <FormInput label="Reg No" icon={Hash} value={newMember.reg_no} onChange={(v: string) => setNewMember({ ...newMember, reg_no: v })} placeholder="2209..." />
+                                <FormInput label="Name" icon={User} value={newMember.name} onChange={(v: string) => setNewMember({ ...newMember, name: v })} placeholder="Full Name" />
+                                <FormInput label="Reg No" icon={Hash} value={newMember.reg_no} onChange={(v: string) => setNewMember({ ...newMember, reg_no: v.toUpperCase() })} placeholder="Reg No" />
+                                <FormInput label="Email" icon={Mail} value={newMember.email} onChange={(v: string) => setNewMember({ ...newMember, email: v })} placeholder="Email Address" />
+                                <FormInput label="Phone" icon={Phone} value={newMember.phone} onChange={(v: string) => setNewMember({ ...newMember, phone: v })} placeholder="Phone Number" />
+
+                                <div className="space-y-1.5 flex flex-col">
+                                    <label className="text-[9px] uppercase font-black text-white/30 tracking-widest pl-1">College</label>
+                                    <select value={newMember.college} onChange={(e) => setNewMember({ ...newMember, college: e.target.value })} className="bg-white/5 border border-white/10 rounded-2xl py-3.5 px-4 outline-none focus:border-cyan-500/50 transition-all font-medium text-white text-xs sm:text-sm h-[46px]">
+                                        <option value="RGM" className="bg-neutral-900">RGM</option>
+                                        <option value="OTHERS" className="bg-neutral-900">Others</option>
+                                    </select>
+                                </div>
+                                {newMember.college === "OTHERS" && (
+                                    <div className="sm:col-span-2">
+                                        <FormInput label="College Name" icon={ExternalLink} value={newMember.otherCollege} onChange={(v: string) => setNewMember({ ...newMember, otherCollege: v })} placeholder="Your College Name" />
+                                    </div>
+                                )}
+                                <div className="space-y-1.5 flex flex-col">
+                                    <label className="text-[9px] uppercase font-black text-white/30 tracking-widest pl-1">Shirt Size</label>
+                                    <select value={newMember.tshirtSize} onChange={(e) => setNewMember({ ...newMember, tshirtSize: e.target.value })} className="bg-white/5 border border-white/10 rounded-2xl py-3.5 px-4 outline-none focus:border-cyan-500/50 transition-all font-medium text-white text-xs sm:text-sm h-[46px]">
+                                        {["XS", "S", "M", "L", "XL", "XXL"].map(s => <option key={s} value={s} className="bg-neutral-900">{s}</option>)}
+                                    </select>
+                                </div>
                                 <FormInput label="Branch" icon={Activity} value={newMember.branch} onChange={(v: string) => setNewMember({ ...newMember, branch: v })} placeholder="CSE" />
                                 <FormInput label="Year" icon={Clock} value={newMember.year} onChange={(v: string) => setNewMember({ ...newMember, year: v })} placeholder="III" />
                             </div>

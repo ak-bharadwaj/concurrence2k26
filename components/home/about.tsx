@@ -24,7 +24,7 @@ export function About() {
             <span className="text-xs uppercase tracking-widest text-cyan-400/80 font-medium">The Event</span>
           </div>
           <h2 className="text-2xl sm:text-3xl md:text-4xl font-bold mb-3">
-            About <span className="bg-gradient-to-r from-cyan-400 to-purple-400 bg-clip-text text-transparent">TechSprint</span>
+            About <span className="bg-gradient-to-r from-cyan-400 to-purple-400 bg-clip-text text-transparent">Hackathon</span>
           </h2>
           <p className="text-white/50 max-w-xl mx-auto text-sm leading-relaxed">
             {techSprintInfo.description}
@@ -51,8 +51,8 @@ export function About() {
                 className={`flex items-center gap-2 px-3 py-2 rounded-full bg-white/[0.03] border border-white/[0.08] text-xs`}
               >
                 <stat.icon className={`w-3.5 h-3.5 ${stat.color === "cyan" ? "text-cyan-400" :
-                    stat.color === "purple" ? "text-purple-400" :
-                      stat.color === "yellow" ? "text-yellow-400" : "text-pink-400"
+                  stat.color === "purple" ? "text-purple-400" :
+                    stat.color === "yellow" ? "text-yellow-400" : "text-pink-400"
                   }`} />
                 <span className="text-white/70 font-medium">{stat.value}</span>
               </div>

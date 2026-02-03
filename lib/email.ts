@@ -4,7 +4,7 @@ import { supabase } from './supabase';
 export async function sendEmail(to: string, subject: string, html: string) {
     let transporter: any;
     let fromEmail = process.env.EMAIL_USER;
-    let senderName = 'TechSprint Event';
+    let senderName = 'Hackathon Event';
 
     try {
         // 1. Try to fetch active email account from Supabase
@@ -26,7 +26,7 @@ export async function sendEmail(to: string, subject: string, html: string) {
                 },
             });
             fromEmail = dbAccount.email_address;
-            senderName = dbAccount.sender_name || 'TechSprint Event';
+            senderName = dbAccount.sender_name || 'Hackathon Event';
         } else if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
             // 2. Fallback to Env Variables
             transporter = nodemailer.createTransport({
@@ -64,11 +64,11 @@ export const EMAIL_TEMPLATES = {
     WELCOME: (name: string) => `
         <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #1e293b; max-width: 600px; margin: auto; line-height: 1.8; border: 1px solid #e2e8f0; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);">
             <div style="background: linear-gradient(135deg, #0ea5e9 0%, #2563eb 100%); padding: 30px; text-align: center;">
-                <h1 style="color: white; margin: 0; font-size: 24px; text-transform: uppercase; letter-spacing: 2px;">Welcome to TechSprint 2K26</h1>
+                <h1 style="color: white; margin: 0; font-size: 24px; text-transform: uppercase; letter-spacing: 2px;">Welcome to Hackathon 2K26</h1>
             </div>
             <div style="padding: 40px; background-color: white;">
                 <p style="font-size: 18px; font-weight: 600; margin-top: 0;">Hi ${name},</p>
-                <p>We're absolutely thrilled to have you join the elite ranks of TechSprint 2K26! Your initial registration has been successfully logged into our systems.</p>
+                <p>We're absolutely thrilled to have you join the elite ranks of Hackathon 2K26! Your initial registration has been successfully logged into our systems.</p>
                 
                 <div style="background-color: #f8fafc; border-left: 4px solid #0ea5e9; padding: 20px; margin: 25px 0;">
                     <p style="margin: 0; font-weight: 600; color: #0c4a6e;">Essential Next Steps:</p>
@@ -80,7 +80,7 @@ export const EMAIL_TEMPLATES = {
 
                 <p>Once our team completes the manual audit of your payment, you'll receive your <strong>Official Digital Entry Pass</strong> along with your unique participant credentials.</p>
                 
-                <p style="margin-bottom: 0;">Push the limits,<br/><strong>The TechSprint Management Team</strong></p>
+                <p style="margin-bottom: 0;">Push the limits,<br/><strong>The Hackathon Management Team</strong></p>
             </div>
             <div style="background-color: #f1f5f9; padding: 20px; text-align: center; font-size: 12px; color: #64748b;">
                 This is an automated operational message. Please do not reply directly to this email.
@@ -94,7 +94,7 @@ export const EMAIL_TEMPLATES = {
             </div>
             <div style="padding: 40px; background-color: white;">
                 <p style="font-size: 18px; font-weight: 600; margin-top: 0;">Hi ${name},</p>
-                <p>Thank you for completing your transaction! We have successfully received your payment proof for TechSprint 2K26.</p>
+                <p>Thank you for completing your transaction! We have successfully received your payment proof for Hackathon 2K26.</p>
                 
                 <div style="background-color: #fffbeb; border: 1px solid #fde68a; padding: 20px; border-radius: 12px; margin: 25px 0;">
                     <p style="margin: 0; color: #92400e; font-weight: 600;">Verification in Progress:</p>
@@ -103,10 +103,10 @@ export const EMAIL_TEMPLATES = {
 
                 <p><strong>What to do next?</strong><br/>Sit tight! You'll receive a confirmation email with your QR Entry Pass as soon as your status is flipped to 'Approved' by our specialists.</p>
                 
-                <p style="margin-bottom: 0;">Thank you for your cooperation,<br/><strong>The TechSprint Audit Team</strong></p>
+                <p style="margin-bottom: 0;">Thank you for your cooperation,<br/><strong>The Hackathon Audit Team</strong></p>
             </div>
             <div style="background-color: #f1f5f9; padding: 20px; text-align: center; font-size: 12px; color: #64748b;">
-                TechSprint 2K26 Global Command Center • Automated Notification
+                Hackathon 2K26 Global Command Center • Automated Notification
             </div>
         </div>
     `,
@@ -121,7 +121,7 @@ export const EMAIL_TEMPLATES = {
             </div>
             <div style="padding: 40px; background-color: white;">
                 <p style="font-size: 18px; font-weight: 600; margin-top: 0;">Welcome to the Arena, ${name}!</p>
-                <p>Great news! Your credentials have been audited and verified. You are now fully authorized to participate in <strong>TechSprint 2K26</strong>.</p>
+                <p>Great news! Your credentials have been audited and verified. You are now fully authorized to participate in <strong>Hackathon 2K26</strong>.</p>
                 
                 <div style="background: #f1f5f9; border: 2px dashed #cbd5e1; padding: 25px; border-radius: 15px; margin: 30px 0; text-align: center;">
                     <p style="text-transform: uppercase; font-size: 11px; font-weight: 800; letter-spacing: 0.2em; color: #64748b; margin: 0 0 10px 0;">Official Participant ID</p>
@@ -147,10 +147,10 @@ export const EMAIL_TEMPLATES = {
                     <p style="font-size: 14px; color: #475569;"><strong>Arrival Logistics:</strong> Please arrive at the venue at least 30 minutes before the scheduled start time. Ensure you have a valid college ID card for secondary verification.</p>
                 </div>
                 
-                <p style="margin-top: 30px; margin-bottom: 0; font-weight: 700;">Prepare for Greatness,<br/>The TechSprint Organizing Committee</p>
+                <p style="margin-top: 30px; margin-bottom: 0; font-weight: 700;">Prepare for Greatness,<br/>The Hackathon Organizing Committee</p>
             </div>
             <div style="background-color: #f8fafc; padding: 25px; text-align: center; font-size: 11px; color: #94a3b8; border-top: 1px solid #f1f5f9;">
-                TechSprint 2K26 • Authorized Entry Document • Digital Signature Verified
+                Hackathon 2K26 • Authorized Entry Document • Digital Signature Verified
             </div>
         </div>
     `,
@@ -168,13 +168,20 @@ export const EMAIL_TEMPLATES = {
                     <ol style="margin: 10px 0 0 0; padding-left: 20px; color: #7f1d1d; font-size: 14px;">
                         <li>Log in to your dashboard and re-verify your transaction reference number.</li>
                         <li>Ensure the uploaded screenshot clearly shows the UTR/Transaction ID and timestamp.</li>
-                        <li>Re-submit the proof or contact our support desk for immediate assistance.</li>
+                        <li>Re-submit the proof with correct details.</li>
                     </ol>
                 </div>
 
-                <p>We want to ensure you don't miss out on TechSprint 2K26. Please address this update as soon as possible to secure your participation.</p>
+                <div style="background: linear-gradient(to right, #eff6ff, #dbeafe); border: 1px solid #3b82f6; padding: 20px; border-radius: 12px; margin: 25px 0;">
+                    <p style="margin: 0 0 10px 0; font-weight: 600; color: #1e40af;">Need Help? Contact Support:</p>
+                    <p style="margin: 5px 0; font-size: 14px; color: #1e3a8a;">📧 Email: <a href="mailto:support@hackathon2k26.com" style="color: #2563eb; text-decoration: none; font-weight: 600;">support@hackathon2k26.com</a></p>
+                    <p style="margin: 5px 0; font-size: 14px; color: #1e3a8a;">📞 Phone: <strong>+91-XXXXXXXXXX</strong></p>
+                    <p style="margin: 10px 0 0 0; font-size: 13px; color: #475569;">Our support team is available to assist you with any questions or concerns.</p>
+                </div>
+
+                <p>We want to ensure you don't miss out on Hackathon 2K26. Please address this update as soon as possible to secure your participation.</p>
                 
-                <p style="margin-bottom: 0;">Regards,<br/><strong>TechSprint Audit Department</strong></p>
+                <p style="margin-bottom: 0;">Regards,<br/><strong>Hackathon Audit Department</strong></p>
             </div>
             <div style="background-color: #fef2f2; padding: 20px; text-align: center; font-size: 12px; color: #b91c1c;">
                 Urgent Status Update • Manual Review Required
@@ -192,11 +199,11 @@ export const EMAIL_TEMPLATES = {
                     ${message.replace(/\n/g, '<br/>')}
                 </div>
                 <div style="margin-top: 40px; padding-top: 25px; border-top: 1px solid #f1f5f9;">
-                    <p style="margin: 0; color: #64748b; font-size: 14px;">Official Dispatch from:<br/><strong style="color: #0ea5e9;">TechSprint 2K26 High Command</strong></p>
+                    <p style="margin: 0; color: #64748b; font-size: 14px;">Official Dispatch from:<br/><strong style="color: #0ea5e9;">Hackathon 2K26 High Command</strong></p>
                 </div>
             </div>
             <div style="background-color: #f8fafc; padding: 20px; text-align: center; font-size: 11px; color: #94a3b8;">
-                This document is part of the official TechSprint 2K26 communications protocol.
+                This document is part of the official Hackathon 2K26 communications protocol.
             </div>
         </div>
     `

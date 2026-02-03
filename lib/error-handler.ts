@@ -1,48 +1,80 @@
 export function getFriendlyError(error: any): string {
     if (!error) return "An unknown error occurred.";
 
-    // If it's an object with a code (Supabase error)
-    if (typeof error === 'object' && error.code) {
-        return translateCode(error.code, error.message);
-    }
+    let code: string | undefined;
+    let message: string | undefined;
+    let details: string | undefined;
 
-    // Handle string errors that might be stringified JSON
+    // 1. Resolve Source and Extract Code/Message
     if (typeof error === 'string') {
-        try {
-            const parsed = JSON.parse(error);
-            if (parsed.code) return translateCode(parsed.code, parsed.message);
-        } catch (e) {
-            // Not JSON, continue
+        if (error.trim().startsWith('{')) {
+            try {
+                const parsed = JSON.parse(error);
+                return getFriendlyError(parsed);
+            } catch (e) { }
         }
-        return error;
+        message = error;
+    } else if (typeof error === 'object') {
+        code = error.code || error.statusCode || error.status;
+        message = error.message || error.details || error.hint || error.error_description || error.error;
+        details = error.details || error.hint;
+
+        // Deep dive into message if it's a stringified object
+        if (typeof message === 'string' && message.trim().startsWith('{')) {
+            try {
+                const inner = JSON.parse(message);
+                if (inner.message) message = inner.message;
+                if (inner.code && !code) code = inner.code;
+            } catch (e) { }
+        }
     }
 
-    // Handle standard Error objects
-    if (error instanceof Error) {
-        const msg = error.message.toLowerCase();
-        if (msg.includes("invalid team code")) return "Invalid Team Code. Please check and try again.";
-        if (msg.includes("team is full")) return "Squad full: This team already has 5 members.";
-        if (msg.includes("failed to fetch") || msg.includes("network")) return "Network error: Please check your internet connection.";
-        return error.message;
+    // 2. Translate Known Codes
+    if (code) {
+        const translated = translateCode(String(code), message);
+        if (translated) return translated;
     }
 
-    return "Something went wrong. Please try again.";
+    // 3. Handle Common Message Patterns
+    if (message) {
+        const strMsg = String(message);
+        const lowerMsg = strMsg.toLowerCase();
+
+        // CATCH-ALL FOR TECHNICAL LEAKAGE: If it looks like an object even without quotes
+        if (strMsg.includes('code:') || strMsg.includes('details:') || strMsg.trim().startsWith('{')) {
+            return "Registration error: Please ensure your details are correct (check for duplicate Reg No/Email).";
+        }
+
+        if (lowerMsg.includes("invalid team code") || lowerMsg.includes("not found")) return "Invalid Squad Code. Please check and try again.";
+        if (lowerMsg.includes("team is full") || lowerMsg.includes("capacity")) return "Oops, looks like you're late! This squad is full now.";
+        if (lowerMsg.includes("already registered") || lowerMsg.includes("duplicate")) return "Registration Conflict: This ID or Email is already officially registered.";
+        if (lowerMsg.includes("failed to fetch") || lowerMsg.includes("network")) return "Network Issues: Please check your internet connection and try again.";
+
+        return strMsg;
+    }
+
+    return "System encounter: Something went wrong. Please try again or contact support.";
 }
 
 function translateCode(code: string, rawMessage: string = ""): string {
-    const message = rawMessage.toLowerCase();
+    const message = (rawMessage || "").toLowerCase();
     switch (code) {
         case "23505":
             if (message.includes("reg_no")) return "This Registration Number is already registered.";
             if (message.includes("email")) return "This Email address is already in use.";
-            return "Entry already exists (Duplicate).";
+            if (message.includes("transaction_id")) return "This Transaction ID has already been submitted by another user.";
+            return "This warrior is already in our records. Please use a different Registration No.";
         case "23503":
-            return "Reference error: The related record was not found.";
+            return "Data Link Error: The related record was not found in our database.";
         case "42501":
-            return "Permission denied: You don't have access to perform this action.";
+            return "Access Denied: You don't have permission to perform this secure action.";
         case "23502":
-            return "Incomplete data. Please fill all required fields.";
+            return "Incomplete Profile: Please fill all required fields before syncing.";
+        case "P0001":
+            return rawMessage || "Validation Protocol Error";
+        case "42P01":
+            return "System Error: Registration gateway unavailable. Please contact the core team.";
         default:
-            return rawMessage || `Internal Error (${code})`;
+            return ""; // Fallback to message check in getFriendlyError
     }
 }

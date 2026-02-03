@@ -56,7 +56,7 @@ export default function SuccessPage() {
             >
                 <div className="text-center pb-4 border-b border-white/10">
                     <p className="text-2xl font-bold text-white mb-2">Wait for Verification 🚀</p>
-                    <p className="text-sm text-white/40">You are one step away from TechSprint 2K26.</p>
+                    <p className="text-sm text-white/40">You are one step away from Hackathon 2K26.</p>
                 </div>
 
                 <div className="flex items-start gap-4 text-left">

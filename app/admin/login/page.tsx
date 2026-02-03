@@ -46,7 +46,7 @@ export default function AdminLoginPage() {
                             <Lock className="w-8 h-8 text-white" />
                         </div>
                         <h1 className="text-2xl font-bold">Admin Portal</h1>
-                        <p className="text-white/40 text-sm">TechSprint 2K26 Central Dashboard</p>
+                        <p className="text-white/40 text-sm">Hackathon 2K26 Central Dashboard</p>
                     </div>
 
                     <form onSubmit={handleLogin} className="space-y-6">

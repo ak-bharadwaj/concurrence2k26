@@ -6,6 +6,7 @@
 ALTER TABLE public.teams ADD COLUMN IF NOT EXISTS team_number text;
 ALTER TABLE public.users ADD COLUMN IF NOT EXISTS verified_by uuid REFERENCES public.admins(id);
 ALTER TABLE public.users ADD COLUMN IF NOT EXISTS is_present boolean DEFAULT false;
+ALTER TABLE public.email_accounts ADD COLUMN IF NOT EXISTS sender_name text DEFAULT 'TechSprint Event';
 
 -- 2. CREATE ATTENDANCE REGISTRY
 CREATE TABLE IF NOT EXISTS public.attendance (

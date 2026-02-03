@@ -41,7 +41,7 @@ export async function resetQRUsage() {
     return true;
 }
 
-export async function createTeam(name: string, paymentMode: "INDIVIDUAL" | "BULK" = "INDIVIDUAL", maxMembers: number = 5) {
+export async function createTeam(name: string, leaderId: string, paymentMode: "INDIVIDUAL" | "BULK" = "INDIVIDUAL", maxMembers: number = 5) {
     let team = null;
     let attempts = 0;
 
@@ -73,6 +73,7 @@ export async function createTeam(name: string, paymentMode: "INDIVIDUAL" | "BULK
             .insert([{
                 name,
                 unique_code,
+                leader_id: leaderId,
                 payment_mode: paymentMode,
                 max_members: maxMembers,
                 team_number // New column
@@ -103,14 +104,22 @@ export async function joinTeam(code: string) {
 
     if (error) throw new Error("Invalid Team Code");
 
-    // Check if team is full
-    const { count } = await supabase
+    // Check if team is full (including pending requests)
+    const { count: memberCount } = await supabase
         .from("users")
         .select("*", { count: 'exact', head: true })
         .eq("team_id", team.id);
 
-    if (count !== null && count >= (team.max_members || 5)) {
-        throw new Error("Team is full");
+    const { count: requestCount } = await supabase
+        .from("join_requests")
+        .select("*", { count: 'exact', head: true })
+        .eq("team_id", team.id)
+        .eq("status", 'PENDING');
+
+    const totalOccupied = (memberCount || 0) + (requestCount || 0);
+
+    if (totalOccupied >= (team.max_members || 5)) {
+        throw new Error("Oops, looks like you're late! This squad is full now.");
     }
 
     return team;
@@ -153,6 +162,8 @@ export async function registerUser(userData: {
     branch: string;
     year: string;
     team_id?: string;
+    today_date?: string; // dummy for compatibility
+    tshirt_size?: string;
     role?: string;
 }) {
     // 1. Check if user already exists and is locked (Approved/Pending)
@@ -195,10 +206,13 @@ export async function registerUser(userData: {
         .select()
         .single();
 
-    if (error) throw error;
+    if (error) {
+        console.error("SUPABASE ERROR in registerUser:", error);
+        throw error;
+    }
 
     // Send Welcome Email (Non-blocking)
-    sendEmail(userData.email, "Registration Received - TechSprint 2K26", EMAIL_TEMPLATES.WELCOME(userData.name));
+    sendEmail(userData.email, "Registration Received - Hackathon 2K26", EMAIL_TEMPLATES.WELCOME(userData.name));
 
     // If Leader, update team leader_id
     if (userData.team_id && userData.role === 'LEADER') {
@@ -225,10 +239,8 @@ export async function submitPayment(userId: string, paymentData: {
 
     const isBulkLeader = user.role === 'LEADER' && user.teams?.payment_mode === 'BULK' && user.team_id;
 
-    // 2. Block individual payment for non-leaders in BULK mode
-    if (user.teams?.payment_mode === 'BULK' && user.role !== 'LEADER') {
-        throw new Error("This squad is in BULK payment mode. Only the squad leader can submit the team payment.");
-    }
+    // 2. Allow payment if user is unpaid OR is a leader of a bulk team
+    // (Removed strict blockage for non-leaders in BULK mode to allow late-joiners to pay for themselves)
 
     // 3. Update the payer's status
     const { error } = await supabase
@@ -240,6 +252,28 @@ export async function submitPayment(userId: string, paymentData: {
         .eq("id", userId);
 
     if (error) throw error;
+
+    // 4. Check for accepted join requests and link team
+    const { data: joinReq } = await supabase
+        .from("join_requests")
+        .select("team_id")
+        .eq("user_id", userId)
+        .eq("status", "ACCEPTED")
+        .maybeSingle();
+
+    if (joinReq) {
+        await supabase
+            .from("users")
+            .update({ team_id: joinReq.team_id, role: "MEMBER" })
+            .eq("id", userId);
+
+        // Mark request as COMPLETED
+        await supabase
+            .from("join_requests")
+            .update({ status: "COMPLETED" })
+            .eq("user_id", userId)
+            .eq("team_id", joinReq.team_id);
+    }
 
     // 3. If it's a BULK leader, push all members to PENDING for verification
     if (isBulkLeader) {
@@ -253,7 +287,7 @@ export async function submitPayment(userId: string, paymentData: {
     }
 
     // Send Payment Received Email (Non-blocking)
-    sendEmail(user.email, "Payment Received - TechSprint 2K26", EMAIL_TEMPLATES.PAYMENT_RECEIVED(user.name));
+    sendEmail(user.email, "Payment Received - Hackathon 2K26", EMAIL_TEMPLATES.PAYMENT_RECEIVED(user.name));
 
     return true;
 }
@@ -312,7 +346,7 @@ export async function updateStatus(
         // Always notify the specifically updated user
         sendEmail(
             user.email,
-            "Registration Approved! 🎉 - TechSprint 2K26",
+            "Registration Approved! 🎉 - Hackathon 2K26",
             EMAIL_TEMPLATES.PAYMENT_VERIFIED(user.name, qrUrl(user.id), user.reg_no, whatsappLink)
         );
 
@@ -329,7 +363,7 @@ export async function updateStatus(
                 members.forEach(m => {
                     sendEmail(
                         m.email,
-                        "Registration Approved! 🎉 - TechSprint 2K26",
+                        "Registration Approved! 🎉 - Hackathon 2K26",
                         EMAIL_TEMPLATES.PAYMENT_VERIFIED(m.name, qrUrl(m.id), m.reg_no, whatsappLink)
                     );
                 });
@@ -344,6 +378,62 @@ export async function updateStatus(
     }
 
     return user;
+}
+
+export async function approveTeamPayment(
+    teamId: string,
+    adminId: string,
+    paymentDetails: { transaction_id: string | null; screenshot_url: string | null }
+) {
+    // 1. Fetch all team members to notify them later
+    const { data: members, error: mErr } = await supabase
+        .from("users")
+        .select("*")
+        .eq("team_id", teamId);
+
+    if (mErr) throw mErr;
+    if (!members || members.length === 0) throw new Error("No members found in this squad.");
+
+    // 2. Update all members to APPROVED with the provided proof
+    // We only update those who are not already REJECTED (unless manual override intended, but usually safety first)
+    const { error: uErr } = await supabase
+        .from("users")
+        .update({
+            status: "APPROVED",
+            verified_by: adminId
+        })
+        .eq("team_id", teamId)
+        .neq("status", "REJECTED");
+
+    if (uErr) throw uErr;
+
+    // 3. Log the action (using the Team Leader or first member as reference)
+    const referenceUserId = members.find(m => m.role === 'LEADER')?.id || members[0].id;
+    await supabase.from("action_logs").insert([{
+        user_id: referenceUserId,
+        admin_id: adminId,
+        action: "BULK_APPROVE_PAYMENT"
+    }]);
+
+    // 4. Send Emails
+    const qrUrl = (uid: string) => `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${uid}`;
+
+    // We need to fetch the WhatsApp link. Assuming all are from same college or using Leader's college.
+    const leader = members.find(m => m.role === 'LEADER') || members[0];
+    const waLink = await getActiveGroupLink(leader.college);
+
+    for (const member of members) {
+        // Skip if they were already approved (to avoid spam) - though frontend usually handles this
+        if (member.status === "APPROVED") continue;
+
+        sendEmail(
+            member.email,
+            "Registration Approved! 🎉 - Hackathon 2K26",
+            EMAIL_TEMPLATES.PAYMENT_VERIFIED(member.name, qrUrl(member.id), member.reg_no, waLink || "")
+        );
+    }
+
+    return true;
 }
 
 export async function getActiveGroupLink(college: string) {
@@ -389,39 +479,26 @@ export async function requestJoinTeam(teamId: string, userId: string) {
     return true;
 }
 
-export async function getJoinRequests(teamId: string) {
+export async function getJoinRequests(teamId: string, status: 'PENDING' | 'ACCEPTED' | 'COMPLETED' = 'PENDING') {
     const { data, error } = await supabase
         .from("join_requests")
-        .select("*, users(name, reg_no, college)")
+        .select("*, users!user_id(name, reg_no, college)")
         .eq("team_id", teamId)
-        .eq("status", 'PENDING');
+        .eq("status", status);
     if (error) throw error;
     return data;
 }
 
-export async function respondToJoinRequest(requestId: string, status: 'APPROVED' | 'REJECTED') {
-    const { data: request, error: rErr } = await supabase
-        .from("join_requests")
-        .select("*")
-        .eq("id", requestId)
-        .single();
+export async function respondToJoinRequest(requestId: string, status: 'ACCEPTED' | 'REJECTED') {
+    // We NO LONGER update the users table here. 
+    // The user must PAY first, then they get added to the team.
 
-    if (rErr) throw rErr;
-
-    if (status === 'APPROVED') {
-        const { error: uErr } = await supabase
-            .from("users")
-            .update({ team_id: request.team_id, role: 'MEMBER' })
-            .eq("id", request.user_id);
-        if (uErr) throw uErr;
-    }
-
-    const { error: dErr } = await supabase
+    const { error } = await supabase
         .from("join_requests")
         .update({ status })
         .eq("id", requestId);
-    if (dErr) throw dErr;
 
+    if (error) throw error;
     return true;
 }
 
@@ -570,9 +647,10 @@ export async function addMemberToTeam(memberData: {
     college?: string,
     branch?: string,
     year?: string,
+    tshirt_size?: string,
     other_college?: string
 }, teamId: string) {
-    const { reg_no, name, email, phone, college, branch, year, other_college } = memberData;
+    const { reg_no, name, email, phone, college, branch, year, tshirt_size, other_college } = memberData;
 
     // 1. Check if user already exists
     const { data: existingUser } = await supabase
@@ -590,14 +668,14 @@ export async function addMemberToTeam(memberData: {
     const { count } = await supabase.from("users").select("*", { count: 'exact', head: true }).eq("team_id", teamId);
 
     if (count !== null && count >= (team?.max_members || 5)) {
-        throw new Error("Your squad has reached its maximum deployment capacity.");
+        throw new Error("Oops, looks like you're late! This squad is full now.");
     }
 
     if (existingUser) {
         // Double check capacity again for existing user joining (race condition protection)
         const { count: finalCount } = await supabase.from("users").select("*", { count: 'exact', head: true }).eq("team_id", teamId);
         if (finalCount !== null && finalCount >= (team?.max_members || 5)) {
-            throw new Error("The squad just hit its limit. Deployment aborted.");
+            throw new Error("Oops, looks like you're late! This squad is full now.");
         }
 
         // Just link the existing solo user
@@ -626,7 +704,7 @@ export async function addMemberToTeam(memberData: {
         // Double check capacity again for new user (race condition protection)
         const { count: finalCount } = await supabase.from("users").select("*", { count: 'exact', head: true }).eq("team_id", teamId);
         if (finalCount !== null && finalCount >= (team?.max_members || 5)) {
-            throw new Error("The squad just hit its limit. Deployment aborted.");
+            throw new Error("Oops, looks like you're late! This squad is full now.");
         }
 
         const { data: newUser, error: iErr } = await supabase
@@ -638,6 +716,7 @@ export async function addMemberToTeam(memberData: {
                 phone,
                 college: finalCollege,
                 branch: branch || "N/A",
+                tshirt_size: tshirt_size || "M",
                 year: year || "I",
                 team_id: teamId,
                 role: "MEMBER",
@@ -706,3 +785,17 @@ export async function fetchAttendanceReport(date: string) {
         };
     });
 }
+
+export async function sendCustomUserEmail(userId: string, subject: string, message: string) {
+    const { data: user, error: userErr } = await supabase
+        .from("users")
+        .select("name, email")
+        .eq("id", userId)
+        .single();
+
+    if (userErr || !user) throw new Error("User not found");
+
+    await sendEmail(user.email, subject, EMAIL_TEMPLATES.CUSTOM(user.name, subject, message));
+    return true;
+}
+

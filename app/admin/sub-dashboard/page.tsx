@@ -133,7 +133,7 @@ export default function SubDashboard() {
                         <div className="w-8 h-8 rounded-lg bg-gradient-to-r from-cyan-500 to-purple-500 flex items-center justify-center font-bold">
                             TS
                         </div>
-                        <span className="font-bold tracking-tight">TechSprint <span className="text-cyan-400 text-xs uppercase tracking-tighter">Sub-Admin</span> <span className="text-orange-500 scale-75 border border-orange-500/20 px-1 rounded bg-orange-500/5 text-[10px]">v2.1</span></span>
+                        <span className="font-bold tracking-tight">Hackathon <span className="text-cyan-400 text-xs uppercase tracking-tighter">Sub-Admin</span> <span className="text-orange-500 scale-75 border border-orange-500/20 px-1 rounded bg-orange-500/5 text-[10px]">v2.1</span></span>
                     </div>
                     <div className="flex items-center gap-4">
                         <span className="text-sm text-white/40">Logged in as: <span className="text-white">{admin.username}</span></span>

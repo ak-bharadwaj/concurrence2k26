@@ -22,12 +22,12 @@ const orbitron = Orbitron({
 });
 
 export const metadata: Metadata = {
-  title: "TechSprint 2K26 - 24 Hour National Level Hackathon | Win an Internship",
+  title: "Hackathon 2K26 - 24 Hour National Level Hackathon | Win an Internship",
   description:
-    "Join TechSprint 2K26 at RGM College of Engineering & Technology. A 24-hour national level hackathon. IdeateX → CodeJam → Win an Internship!",
+    "Join Hackathon 2K26 at RGM College of Engineering & Technology. A 24-hour national level hackathon. IdeateX → CodeJam → Win an Internship!",
   keywords: [
     "hackathon",
-    "TechSprint 2026",
+    "Hackathon 2026",
     "coding competition",
     "ideathon",
     "codathon",
@@ -38,16 +38,16 @@ export const metadata: Metadata = {
   ],
   authors: [{ name: "Department of CSE, RGMCET" }],
   openGraph: {
-    title: "TechSprint 2K26 - 24 Hour Hackathon | Win an Internship",
+    title: "Hackathon 2K26 - 24 Hour Hackathon | Win an Internship",
     description:
-      "Join TechSprint 2K26, a 24-hour national level hackathon. IdeateX → CodeJam → Win an Internship!",
+      "Join Hackathon 2K26, a 24-hour national level hackathon. IdeateX → CodeJam → Win an Internship!",
     type: "website",
     locale: "en_US",
-    siteName: "TechSprint 2K26",
+    siteName: "Hackathon 2K26",
   },
   twitter: {
     card: "summary_large_image",
-    title: "TechSprint 2K26",
+    title: "Hackathon 2K26",
     description: "24-hour national level hackathon at RGMCET.",
   },
   icons: {
@@ -57,7 +57,7 @@ export const metadata: Metadata = {
     ],
     apple: "/apple-icon.png",
   },
-  generator: 'TechSprint 2K26'
+  generator: 'Hackathon 2K26'
 };
 
 export const viewport: Viewport = {

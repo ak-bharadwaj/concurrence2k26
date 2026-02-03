@@ -105,7 +105,7 @@ export default function FAQPage() {
                         Back to Home
                     </button>
                     <h1 className="text-4xl font-black uppercase tracking-tighter mb-2">Frequently Asked Questions</h1>
-                    <p className="text-white/60">Find answers to common questions about TechSprint 2K26</p>
+                    <p className="text-white/60">Find answers to common questions about Hackathon 2K26</p>
                 </div>
 
                 <div className="space-y-6">

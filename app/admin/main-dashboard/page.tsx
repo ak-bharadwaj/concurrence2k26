@@ -29,16 +29,21 @@ import {
     UserCheck,
     RotateCcw,
     PlusCircle,
-    ShieldAlert
+    ShieldAlert,
+    MessageCircle,
+    Crown,
+    AlertTriangle
 } from "lucide-react";
 import { Scanner } from "@yudiel/react-qr-scanner";
 import ExcelJS from "exceljs";
 import { supabase } from "@/lib/supabase";
 import { getAdminSession, adminLogout } from "@/lib/auth";
-import { updateStatus, getActiveGroupLink, deleteUser, resetQRUsage, markAttendance, fetchAttendanceReport, sendCustomUserEmail } from "@/lib/supabase-actions";
+import { updateStatus, getActiveGroupLink, deleteUser, resetQRUsage, markAttendance, fetchAttendanceReport, sendCustomUserEmail, approveTeamPayment } from "@/lib/supabase-actions";
 import { getFriendlyError } from "@/lib/error-handler";
 import Image from "next/image";
 import { MemberDetailModal } from "./MemberDetailModal";
+import { VerificationGroupModal } from "./VerificationGroupModal";
+import { TeamPaymentModal } from "./TeamPaymentModal";
 
 
 type Tab = "USERS" | "VERIFY_QUEUE" | "ADMINS" | "QR" | "EMAILS" | "GROUPS" | "LOGS" | "TEAMS" | "SCAN" | "TEAM_DETAILS";
@@ -55,7 +60,8 @@ export default function MainDashboard() {
         qr: [],
         emails: [],
         groups: [],
-        logs: []
+        logs: [],
+        teams: []
     });
     const [loading, setLoading] = useState(true);
 
@@ -76,7 +82,9 @@ export default function MainDashboard() {
 
     // Squad Command Center State
     const [teamViewMode, setTeamViewMode] = useState<'ALL' | 'SOLO'>('ALL');
-    const [viewMode, setViewMode] = useState<'VISUAL' | 'GRID'>('GRID');
+    const [participantViewMode, setParticipantViewMode] = useState<'TABLE' | 'GROUPED'>('TABLE');
+    const [memberTypeFilter, setMemberTypeFilter] = useState<'ALL' | 'SQUAD' | 'SOLO'>('ALL');
+    const [viewMode, setViewMode] = useState<'GRID' | 'VISUAL'>('GRID');
     const [recruitState, setRecruitState] = useState<{ teamId: string, slotId: number } | null>(null);
     const [lastSynced, setLastSynced] = useState<Date | null>(null);
 
@@ -86,6 +94,7 @@ export default function MainDashboard() {
     const [scanResult, setScanResult] = useState<any>(null);
     const [recentScans, setRecentScans] = useState<any[]>([]);
     const [emailModal, setEmailModal] = useState<{ userId: string, name: string } | null>(null);
+    const [verificationGroup, setVerificationGroup] = useState<any>(null);
     const [emailSubject, setEmailSubject] = useState("");
     const [emailMessage, setEmailMessage] = useState("");
 
@@ -98,32 +107,30 @@ export default function MainDashboard() {
         setAdmin(session);
         fetchAllData();
 
-        // Real-time Subscription - Optimized for Concurrency
+        // Real-time Subscription - Optimized for Consistency
         const channel = supabase
             .channel('dashboard-changes')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, (payload: any) => {
-                if (payload.eventType === 'UPDATE') {
-                    setData((prev: any) => ({
-                        ...prev,
-                        users: prev.users.map((u: any) => u.id === payload.new.id ? { ...u, ...payload.new } : u)
-                    }));
-                } else {
-                    fetchAllData(); // Fallback for INS/DEL
-                }
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, () => {
+                // Always fetch full data to ensures derived states (like squads) are correctly recalculated
+                fetchAllData();
             })
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, (payload: any) => {
-                if (payload.eventType === 'INSERT') {
-                    // Refresh logs if we are on logs tab, or just update local counts
-                    fetchAllData();
-                }
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, () => {
+                fetchAllData();
             })
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'teams' }, () => fetchAllData())
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'teams' }, () => {
+                fetchAllData();
+            })
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'join_requests' }, () => {
+                fetchAllData();
+            })
             .on('postgres_changes', { event: '*', schema: 'public', table: 'qr_codes' }, (payload: any) => {
                 if (payload.eventType === 'UPDATE') {
                     setData((prev: any) => ({
                         ...prev,
                         qr: prev.qr.map((q: any) => q.id === payload.new.id ? { ...q, ...payload.new } : q)
                     }));
+                } else {
+                    fetchAllData();
                 }
             })
             .subscribe();
@@ -160,14 +167,23 @@ export default function MainDashboard() {
     };
 
     const handleCreateTeam = async (name: string, mode: string) => {
-        const code = Math.random().toString(36).substring(2, 8).toUpperCase();
-        const { error } = await supabase.from('teams').insert({
-            name,
-            payment_mode: mode,
-            unique_code: code,
-            max_members: 4 // Default
-        });
-        if (error) throw error;
+        if (loading) return;
+        try {
+            setLoading(true);
+            const code = Math.random().toString(36).substring(2, 8).toUpperCase();
+            const { error } = await supabase.from('teams').insert({
+                name,
+                payment_mode: mode,
+                unique_code: code,
+                max_members: 4 // Default
+            });
+            if (error) throw error;
+            fetchAllData();
+        } catch (err: any) {
+            alert("Failed to create team: " + err.message);
+        } finally {
+            setLoading(false);
+        }
     };
 
     const handleEditTeam = async (id: string, field: string, value: any) => {
@@ -198,6 +214,7 @@ export default function MainDashboard() {
 
     const handleAdd = async (e: React.FormEvent) => {
         e.preventDefault();
+        if (loading) return;
         try {
             setLoading(true);
             let table = "";
@@ -273,7 +290,6 @@ export default function MainDashboard() {
                 dataToInsert = {
                     email_address: formData.email_address,
                     app_password: formData.app_password,
-                    sender_name: formData.sender_name || 'TechSprint Admin',
                     smtp_host: formData.smtp_host || 'smtp.gmail.com',
                     smtp_port: parseInt(formData.smtp_port) || 465
                 };
@@ -312,19 +328,20 @@ export default function MainDashboard() {
         try {
             setLoading(true);
             const results = await Promise.all([
-                supabase.from("users").select("*, squad:teams!team_id(name, unique_code, team_number)").order("created_at", { ascending: false }),
-                supabase.from("admins").select("*").order("created_at", { ascending: false }),
+                supabase.from("users").select("*, team_id, squad:teams!team_id(name, unique_code, team_number)").order("created_at", { ascending: false }),
+                supabase.from("admins").select("id, username, role, active, created_at").order("created_at", { ascending: false }),
                 supabase.from("qr_codes").select("*").order("created_at", { ascending: false }),
-                supabase.from("email_accounts").select("*").order("created_at", { ascending: false }),
+                supabase.from("email_accounts").select("id, email_address, smtp_host, smtp_port, active, created_at").order("created_at", { ascending: false }),
                 supabase.from("group_links").select("*").order("created_at", { ascending: false }),
                 supabase.from("action_logs").select("*, users!user_id(name), admins(username)").order("timestamp", { ascending: false }).limit(50),
-                supabase.from("teams").select("*, members:users(id, name, status, role)")
+                supabase.from("teams").select("*")
             ]);
 
             // Robust individual error checks
             const errors = results.filter(r => r.error).map(r => r.error?.message);
             if (errors.length > 0) {
                 // We show alert but still try to render what we got
+                console.error("Sync errors:", errors);
                 alert("Some data failed to sync: \n" + errors.join("\n"));
             }
 
@@ -344,12 +361,17 @@ export default function MainDashboard() {
             });
 
             const unifiedTeams = [
-                ...(teams || []).map((t: any) => ({
-                    ...t,
-                    memberCount: (users || []).filter((u: any) => u.team_id === t.id).length,
-                    isVirtual: false,
-                    members: (users || []).filter((u: any) => u.team_id === t.id)
-                })),
+                ...(teams || []).map((t: any) => {
+                    // Use loose equality to handle potential string/UUID mismatches
+                    const teamMembers = (users || []).filter((u: any) => u.team_id == t.id);
+                    return {
+                        ...t,
+                        memberCount: teamMembers.length,
+                        isVirtual: false,
+                        members: teamMembers
+                    };
+                }),
+                // Filter out users who have a team_id (truthy)
                 ...(users || []).filter((u: any) => !u.team_id).map((u: any) => ({
                     id: `SOLO-${u.id}`,
                     name: `${u.name}'s Party`,
@@ -360,7 +382,7 @@ export default function MainDashboard() {
                     members: [u],
                     created_at: u.created_at
                 }))
-            ].sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+            ].sort((a: any, b: any) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
 
             setData({
                 users: processedUsers,
@@ -384,15 +406,16 @@ export default function MainDashboard() {
         if (!users.length) return alert("No data to export");
 
         const workbook = new ExcelJS.Workbook();
-        const worksheet = workbook.addWorksheet("TechSprint Users");
+        const worksheet = workbook.addWorksheet("Hackathon Users");
 
         worksheet.columns = [
             { header: "ID", key: "id", width: 30 },
             { header: "Name", key: "name", width: 20 },
             { header: "Reg No", key: "reg_no", width: 15 },
+            { header: "Year of Study", key: "year", width: 12 },
             { header: "Email", key: "email", width: 25 },
             { header: "Phone", key: "phone", width: 15 },
-            { header: "College", key: "college", width: 10 },
+            { header: "College Name", key: "college", width: 25 },
             { header: "Transaction ID", key: "transaction_id", width: 20 },
             { header: "Status", key: "status", width: 10 },
             { header: "Screenshot URL", key: "screenshot_url", width: 50 },
@@ -419,7 +442,7 @@ export default function MainDashboard() {
         const url = window.URL.createObjectURL(blob);
         const anchor = document.createElement('a');
         anchor.href = url;
-        anchor.download = `TechSprint_Registrations_${new Date().toISOString().split('T')[0]}.xlsx`;
+        anchor.download = `Hackathon_Registrations_${new Date().toISOString().split('T')[0]}.xlsx`;
         anchor.click();
         window.URL.revokeObjectURL(url);
     };
@@ -554,28 +577,122 @@ export default function MainDashboard() {
             setLoading(true);
 
             if (action === "APPROVED") {
-                const confirm = window.confirm(`✅ APPROVE ${user.name}?\n\nThis will:\n- Send QR code via email\n- Grant arena access\n- Add to WhatsApp group`);
-                if (!confirm) return;
-
                 const link = await getActiveGroupLink(user.college);
                 await updateStatus(user.id, admin.id, "APPROVED", "APPROVE_PAYMENT", link || "");
-                if (!link) {
-                    // Warn if needed
-                }
             } else if (action === "REJECTED") {
-                const confirm = window.confirm(`❌ REJECT ${user.name}?\n\nThis will:\n- Send rejection email\n- PERMANENTLY DELETE from database\n\nThis cannot be undone.`);
-                if (!confirm) return;
-
+                if (!window.confirm("Reject and DELETE this user?")) return;
                 await updateStatus(user.id, admin.id, "REJECTED", "REJECT_PAYMENT");
                 await deleteUser(user.id);
             }
-
             fetchAllData();
         } catch (err: any) {
             alert("Action failed: " + getFriendlyError(err));
         } finally {
             setLoading(false);
         }
+    };
+
+    const handleApproveMember = async (userId: string) => {
+        try {
+            const user = data.users.find((u: any) => u.id === userId);
+            const link = await getActiveGroupLink(user?.college || "");
+            await updateStatus(userId, admin.id, "APPROVED", "MANUAL_SINGLE_APPROVE", link || "");
+            fetchAllData();
+        } catch (err) {
+            alert("Approval failed: " + getFriendlyError(err));
+        }
+    };
+
+    const handleGroupApprove = async () => {
+        if (!verificationGroup) return;
+        try {
+            setLoading(true);
+            const proofSource = verificationGroup.members.find((m: any) => m.screenshot_url) || verificationGroup.members[0];
+            const paymentDetails = {
+                transaction_id: proofSource.transaction_id,
+                screenshot_url: proofSource.screenshot_url
+            };
+
+            if (verificationGroup.type === 'SQUAD') {
+                await approveTeamPayment(verificationGroup.id, admin.id, paymentDetails);
+            } else {
+                // Solo - just reuse standard approve
+                const link = await getActiveGroupLink(verificationGroup.members[0].college);
+                await updateStatus(verificationGroup.members[0].id, admin.id, "APPROVED", "APPROVE_PAYMENT", link || "");
+            }
+
+            setVerificationGroup(null);
+            fetchAllData();
+        } catch (err: any) {
+            alert("Bulk Approve Failed: " + err.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleGroupReject = async () => {
+        if (!verificationGroup) return;
+        if (!confirm("Reject entire group? This will DELETE these users.")) return;
+
+        try {
+            setLoading(true);
+            // Reject all individually
+            for (const m of verificationGroup.members) {
+                if (m.status === 'APPROVED') continue; // Skip already approved
+                await updateStatus(m.id, admin.id, "REJECTED", "REJECT_PAYMENT");
+                await deleteUser(m.id);
+            }
+            setVerificationGroup(null);
+            fetchAllData();
+        } catch (err: any) {
+            alert("Bulk Reject Failed: " + err.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const getAllParticipantGroups = (usersToGroup: any[]) => {
+        const groups: any[] = [];
+        const processedTeams = new Set();
+
+        usersToGroup.forEach((u: any) => {
+            if (u.team_id && u.squad) {
+                if (processedTeams.has(u.team_id)) return;
+                const teamMembers = data.users.filter((m: any) => m.team_id === u.team_id);
+                groups.push({
+                    id: u.team_id,
+                    type: 'SQUAD',
+                    teamName: u.squad?.name,
+                    teamNumber: u.squad?.team_number || u.squad?.unique_code,
+                    members: teamMembers,
+                    proof: teamMembers.find((m: any) => m.screenshot_url) || null,
+                    count: teamMembers.length,
+                    max_members: u.squad?.max_members
+                });
+                processedTeams.add(u.team_id);
+            } else {
+                groups.push({
+                    id: u.id,
+                    type: 'SOLO',
+                    teamName: u.name,
+                    teamNumber: 'SOLO',
+                    members: [u],
+                    proof: u,
+                    count: 1
+                });
+            }
+        });
+        return groups;
+    };
+
+    const isRGM = (item: any) => {
+        if (!item) return false;
+        // If it's a group/team (has members)
+        if (item.members) {
+            return item.members.some((m: any) => m.college?.toUpperCase().includes('RGM'));
+        }
+        // If it's a single user
+        return item.college?.toUpperCase().includes('RGM');
     };
 
     const handleTestSMTP = async (emailId: string) => {
@@ -599,15 +716,20 @@ export default function MainDashboard() {
     const handleUniversalExport = async () => {
         try {
             setLoading(true);
-            const { data: allUsers } = await supabase
-                .from('users')
-                .select('*, teams(name, unique_code, payment_mode)');
 
-            const { data: allTeams } = await supabase.from('teams').select('*');
+            // Fetch users (no join needed strictly if we have allTeams, avoiding FK errors)
+            const { data: allUsers, error: userErr } = await supabase
+                .from('users')
+                .select('*');
+
+            if (userErr) throw new Error("Users Fetch Error: " + userErr.message);
+
+            const { data: allTeams, error: teamErr } = await supabase.from('teams').select('*');
+            if (teamErr) throw new Error("Teams Fetch Error: " + teamErr.message);
 
             if (!allUsers || !allTeams) return alert("Failed to fetch export data");
 
-            const ExcelJS = (await import('exceljs')).default;
+            // Use static import like other functions
             const workbook = new ExcelJS.Workbook();
             const sheet = workbook.addWorksheet('Master Roster');
 
@@ -618,54 +740,82 @@ export default function MainDashboard() {
                 alignment: { horizontal: 'center' }
             };
 
-            const addBlock = (title: string, members: any[]) => {
-                const startRow = sheet.lastRow ? sheet.lastRow.number + 2 : 1;
+            const addBlock = (title: string, rawMembers: any, teamInfo?: any) => {
+                const members = Array.isArray(rawMembers) ? rawMembers : [];
+                // Add more spacing between blocks for distinct division
+                const startRow = sheet.lastRow ? sheet.lastRow.number + 3 : 1;
 
-                // Title
+                // Title Block (The "Division" Header)
                 const titleRow = sheet.getRow(startRow);
-                titleRow.getCell(1).value = title;
-                titleRow.getCell(1).font = { bold: true, size: 14 };
-                titleRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEEEEEE' } };
-                sheet.mergeCells(startRow, 1, startRow, 10);
+                titleRow.getCell(1).value = title.toUpperCase();
+                // Distinct color for Team headers vs Generic
+                const isRgmTeam = members.some((m: any) => m.college?.toUpperCase().includes('RGM'));
+                const blockColor = isRgmTeam ? 'FFF97316' : (teamInfo ? 'FFd946ef' : 'FF475569'); // Orange for RGM
+                titleRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: blockColor } };
+                sheet.mergeCells(startRow, 1, startRow, 14); // Span 14 columns
+                titleRow.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+                titleRow.height = 30;
 
                 // Headers
                 const headerRow = sheet.getRow(startRow + 1);
-                headerRow.values = ['Name', 'Reg No', 'Phone', 'Email', 'Role', 'Status', 'In Venue?', 'Payment', 'Amount', 'Transaction ID'];
+                // New Order: Team ID as 1st col, Removed 'In Venue'
+                headerRow.values = ['Team Ref', 'Division / Team', 'Name', 'Reg No', 'Year of Study', 'College Name', 'T-Shirt Size', 'Phone', 'Email', 'Role', 'Status', 'Payment Mode', 'Amount', 'Transaction ID'];
                 headerRow.eachCell((cell) => {
                     cell.style = { ...headerStyle };
                 });
 
                 // Data
                 members.forEach((m) => {
+                    // Payment Mode Logic: Team mode overrides unless it's solo
+                    const payMode = teamInfo ? (teamInfo.payment_mode || 'INDIVIDUAL') : (m.payment_mode || 'INDIVIDUAL');
+                    const teamRef = teamInfo ? (teamInfo.team_number || teamInfo.unique_code) : 'SOLO';
+                    const isRgmItem = isRGM(teamInfo ? { members: [m] } : m);
+
+                    // Amount Logic: If approved, it's 800 (base fee). If pending, show what they/we expect.
+                    const amount = m.amount || (m.status === 'APPROVED' ? 800 : 0);
+
                     const row = sheet.addRow([
+                        isRgmItem ? `RGM-${teamRef}` : teamRef, // 1st Col: Team ID/Ref
+                        teamInfo ? `${isRgmItem ? '[RGM] ' : ''}${teamInfo.name}` : 'SOLO', // Division Col
                         m.name,
                         m.reg_no,
+                        m.year || '---',
+                        m.college || '---',
+                        m.tshirt_size || 'M',
                         m.phone,
                         m.email,
                         m.role,
                         m.status,
-                        m.is_present ? 'YES' : 'NO',
-                        m.payment_mode || 'INDIVIDUAL',
-                        m.amount || '0',
+                        payMode,
+                        amount,
                         m.transaction_id || '---'
                     ]);
+
+                    // Style Tweaks
+                    row.getCell(1).font = { color: { argb: 'FF888888' }, bold: true, size: 10 }; // Team Ref
+                    row.getCell(2).font = { color: { argb: 'FF888888' }, italic: true, size: 10 }; // Division Name
+
                     // Auto-color status
-                    if (m.status === 'APPROVED') row.getCell(6).font = { color: { argb: 'FF008800' }, bold: true };
-                    if (m.status === 'REJECTED') row.getCell(6).font = { color: { argb: 'FFFF0000' }, bold: true };
-                    if (m.is_present) row.getCell(7).font = { color: { argb: 'FF0000BB' }, bold: true };
+                    if (m.status === 'APPROVED') row.getCell(11).font = { color: { argb: 'FF008800' }, bold: true };
+                    if (m.status === 'REJECTED') row.getCell(11).font = { color: { argb: 'FFFF0000' }, bold: true };
                 });
 
                 // Borders (Box Style)
                 const endRow = sheet.lastRow!.number;
                 for (let r = startRow; r <= endRow; r++) {
                     const row = sheet.getRow(r);
-                    for (let c = 1; c <= 10; c++) {
+                    for (let c = 1; c <= 14; c++) {
                         const cell = row.getCell(c);
+                        const isTitle = r === startRow;
+
+                        let borderStyle: any = 'thin';
+                        if (isTitle) borderStyle = 'thick';
+
                         cell.border = {
                             top: r === startRow ? { style: 'thick' } : { style: 'thin' },
                             left: c === 1 ? { style: 'thick' } : { style: 'thin' },
                             bottom: r === endRow ? { style: 'thick' } : { style: 'thin' },
-                            right: c === 10 ? { style: 'thick' } : { style: 'thin' }
+                            right: c === 14 ? { style: 'thick' } : { style: 'thin' }
                         };
                     }
                 }
@@ -673,9 +823,9 @@ export default function MainDashboard() {
 
             // 1. Teams
             allTeams.forEach((t: any) => {
-                const members = allUsers.filter((u: any) => u.team_id === t.id);
+                const members = allUsers.filter((u: any) => u.team_id == t.id);
                 if (members.length > 0) {
-                    addBlock(`TEAM: ${t.name.toUpperCase()} (${t.unique_code})`, members);
+                    addBlock(`SQUAD: ${t.name} (Code: ${t.unique_code}) - ${members.length} Members`, members, t);
                 }
             });
 
@@ -687,7 +837,7 @@ export default function MainDashboard() {
 
             // Columns
             sheet.columns = [
-                { width: 30 }, { width: 20 }, { width: 20 }, { width: 35 }, { width: 15 }, { width: 15 }, { width: 15 }, { width: 15 }, { width: 10 }, { width: 25 }
+                { width: 30 }, { width: 30 }, { width: 25 }, { width: 20 }, { width: 15 }, { width: 30 }, { width: 15 }, { width: 20 }, { width: 30 }, { width: 15 }, { width: 15 }, { width: 15 }, { width: 12 }, { width: 25 }
             ];
 
             const buffer = await workbook.xlsx.writeBuffer();
@@ -794,7 +944,10 @@ export default function MainDashboard() {
 
         const matchesStatus = statusFilter === "ALL" || u.status === statusFilter;
 
-        return matchesSearch && matchesStatus;
+        const matchesType = memberTypeFilter === "ALL" ||
+            (memberTypeFilter === "SQUAD" ? !!u.team_id : !u.team_id);
+
+        return matchesSearch && matchesStatus && matchesType;
     });
 
     const handleConvertSoloToTeam = async (soloId: string, recruitId: string) => {
@@ -813,20 +966,28 @@ export default function MainDashboard() {
                     name: teamName,
                     unique_code: code,
                     payment_mode: soloUser.payment_mode || 'INDIVIDUAL',
-                    max_members: 5
+                    max_members: isRGM(soloUser) ? 4 : 5
                 })
                 .select()
                 .single();
 
             if (teamError) throw teamError;
 
-            // 2. Move both users to new team
-            const { error: moveError } = await supabase
+            // 2. Move solo user to team as LEADER
+            const { error: leaderError } = await supabase
                 .from('users')
-                .update({ team_id: newTeam.id })
-                .in('id', [soloId, recruitId]);
+                .update({ team_id: newTeam.id, role: 'LEADER' })
+                .eq('id', soloId);
 
-            if (moveError) throw moveError;
+            if (leaderError) throw leaderError;
+
+            // 3. Move recruited user to team as MEMBER
+            const { error: memberError } = await supabase
+                .from('users')
+                .update({ team_id: newTeam.id, role: 'MEMBER' })
+                .eq('id', recruitId);
+
+            if (memberError) throw memberError;
 
             alert(`Squad "${teamName}" created successfully!`);
             setTeamViewMode('ALL'); // FORCE SWITCH TO ALL TO SHOW NEW TEAM
@@ -848,20 +1009,30 @@ export default function MainDashboard() {
                 const team = data.teams.find((t: any) => t.id === teamId);
                 if (team) {
                     const currentCount = data.users.filter((u: any) => u.team_id === teamId).length;
-                    const maxMembers = team.max_members || 5;
+                    const isRgmTeam = isRGM({ members: data.users.filter((u: any) => u.team_id === teamId) });
+                    const maxMembers = team.max_members || (isRgmTeam ? 4 : 5);
                     const incomingCount = userId === 'BULK' ? selectedUsers.length : 1;
 
                     if (currentCount + incomingCount > maxMembers) {
-                        throw new Error(`Capacity Limit Exceeded! Squad can only hold ${maxMembers} warriors.`);
+                        throw new Error(`Capacity Limit Exceeded! This squad is capped at ${maxMembers} warriors. ${isRgmTeam ? 'Increase capacity first to add a 5th member.' : ''}`);
                     }
                 }
             }
 
             // BULK MERGE LOGIC
             if (userId === 'BULK') {
+                // When moving to a team, set role to MEMBER
+                // When removing from team (teamId is null/empty), reset to MEMBER
+                const updateData: any = { team_id: teamId || null };
+                if (teamId) {
+                    updateData.role = 'MEMBER';
+                } else {
+                    updateData.role = 'MEMBER'; // Reset role when removing from team
+                }
+
                 const { error } = await supabase
                     .from("users")
-                    .update({ team_id: teamId || null })
+                    .update(updateData)
                     .in("id", selectedUsers);
 
                 if (error) throw error;
@@ -869,9 +1040,20 @@ export default function MainDashboard() {
                 setSelectedUsers([]);
             } else {
                 // SINGLE MOVE LOGIC
+                const updateData: any = { team_id: teamId || null };
+
+                // Set role based on destination
+                if (teamId) {
+                    // Moving to a team - set as MEMBER
+                    updateData.role = 'MEMBER';
+                } else {
+                    // Removing from team - reset to MEMBER
+                    updateData.role = 'MEMBER';
+                }
+
                 const { error } = await supabase
                     .from("users")
-                    .update({ team_id: teamId || null })
+                    .update(updateData)
                     .eq("id", userId);
 
                 if (error) throw error;
@@ -979,6 +1161,28 @@ export default function MainDashboard() {
             // Mark Attendance in DB
             await markAttendance(user.id, user.team_id, attendanceDate, attendanceTime);
 
+            // Play professional success sound
+            try {
+                const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+                const oscillator = audioContext.createOscillator();
+                const gainNode = audioContext.createGain();
+
+                oscillator.connect(gainNode);
+                gainNode.connect(audioContext.destination);
+
+                // Professional two-tone success sound
+                oscillator.frequency.setValueAtTime(800, audioContext.currentTime);
+                oscillator.frequency.setValueAtTime(1000, audioContext.currentTime + 0.1);
+
+                gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
+
+                oscillator.start(audioContext.currentTime);
+                oscillator.stop(audioContext.currentTime + 0.3);
+            } catch (e) {
+                console.log("Audio playback not supported");
+            }
+
             // Set scan result for display
             setScanResult({
                 name: user.name,
@@ -1050,6 +1254,7 @@ export default function MainDashboard() {
                     <NavItem icon={QrCode} label="QR Codes" active={activeTab === 'QR'} onClick={() => { setActiveTab('QR'); setMobileMenuOpen(false); }} />
                     <NavItem icon={Mail} label="Email Accounts" active={activeTab === 'EMAILS'} onClick={() => { setActiveTab('EMAILS'); setMobileMenuOpen(false); }} />
                     <NavItem icon={LinkIcon} label="WhatsApp Links" active={activeTab === 'GROUPS'} onClick={() => { setActiveTab('GROUPS'); setMobileMenuOpen(false); }} />
+                    <NavItem icon={MessageCircle} label="Support Tickets" active={false} onClick={() => window.location.href = "/admin/support"} />
                     <NavItem icon={Activity} label="Action Logs" active={activeTab === 'LOGS'} onClick={() => { setActiveTab('LOGS'); setMobileMenuOpen(false); }} />
                 </nav>
 
@@ -1106,6 +1311,15 @@ export default function MainDashboard() {
                                     <option value="VERIFYING">Verifying</option>
                                     <option value="APPROVED">Approved</option>
                                     <option value="REJECTED">Rejected</option>
+                                </select>
+                                <select
+                                    value={memberTypeFilter}
+                                    onChange={(e) => setMemberTypeFilter(e.target.value as any)}
+                                    className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs outline-none focus:border-orange-500/50 appearance-none text-white/60"
+                                >
+                                    <option value="ALL">All Members</option>
+                                    <option value="SQUAD">Squad Only</option>
+                                    <option value="SOLO">Solo Only</option>
                                 </select>
                             </div>
                         )}
@@ -1296,224 +1510,472 @@ export default function MainDashboard() {
                     )}
 
                     {activeTab === 'VERIFY_QUEUE' && (
-                        <div className="space-y-4">
-                            <div className="flex justify-between items-center mb-6">
-                                <h2 className="text-xl font-black tracking-tight">VERIFICATION COMMAND CENTER</h2>
-                                <div className="text-[10px] text-white/40 uppercase font-black">
-                                    {data.users.filter((u: any) => ['PENDING', 'VERIFYING'].includes(u.status)).length} Pending Units
+                        <div className="space-y-6">
+                            <div className="flex justify-between items-center mb-2">
+                                <div>
+                                    <h2 className="text-xl font-black tracking-tight">VERIFICATION COMMAND CENTER</h2>
+                                    <p className="text-[10px] text-white/40 font-mono uppercase tracking-widest mt-1">Grouped Verification Protocol</p>
+                                </div>
+                                <div className="text-right">
+                                    <div className="text-2xl font-black text-orange-500">{getAllParticipantGroups(data.users.filter((u: any) => ['PENDING', 'VERIFYING'].includes(u.status))).length}</div>
+                                    <div className="text-[8px] text-white/40 uppercase font-black tracking-widest">Active Groups</div>
                                 </div>
                             </div>
-                            <TableLayout
-                                headers={['Profile', 'UTR / ID', 'Proof', 'Action']}
-                                data={data.users.filter((u: any) => ['PENDING', 'VERIFYING'].includes(u.status))}
-                                renderRow={(u: any) => (
-                                    <tr key={u.id} className="border-b border-white/5 hover:bg-white/[0.01]">
-                                        <td className="py-4 px-4">
-                                            <div className="font-black text-sm uppercase">{u.name}</div>
-                                            <div className="text-[10px] text-orange-500 font-mono">{u.reg_no}</div>
-                                        </td>
-                                        <td className="py-4 px-4 font-mono text-xs text-white/60">
-                                            {u.transaction_id || 'N/A'}
-                                        </td>
-                                        <td className="py-4 px-4">
-                                            {u.screenshot_url ? (
-                                                <a href={u.screenshot_url} target="_blank" rel="noreferrer" className="w-12 h-12 rounded-xl bg-white/5 flex items-center justify-center border border-white/10 hover:border-orange-500/50 transition-all overflow-hidden relative group">
-                                                    <Image src={u.screenshot_url} alt="Proof" fill className="object-cover" />
-                                                    <div className="absolute inset-0 bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                                                        <ExternalLink className="w-4 h-4 text-white" />
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                {getAllParticipantGroups(data.users.filter((u: any) => ['PENDING', 'VERIFYING'].includes(u.status))).map(group => {
+                                    const proofSource = group.proof;
+                                    const totalAmount = group.count * 800;
+                                    const hasProof = !!proofSource?.screenshot_url;
+                                    const isRgmGroup = isRGM(group);
+                                    const maxMembers = group.max_members || (isRgmGroup ? 4 : 5);
+                                    const isOverCapacity = group.count > maxMembers;
+
+                                    return (
+                                        <div
+                                            key={group.id}
+                                            onClick={() => setVerificationGroup(group)}
+                                            className={`bg-white/5 border border-white/5 hover:border-white/20 hover:bg-white/10 transition-all rounded-3xl p-5 cursor-pointer group relative overflow-hidden ${isRgmGroup ? 'border-l-4 border-l-orange-500' : ''}`}
+                                        >
+                                            <div className="flex justify-between items-start mb-4">
+                                                <div>
+                                                    <div className="flex items-center gap-2 mb-2">
+                                                        <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded inline-block ${group.type === 'SQUAD' ? 'bg-purple-500/20 text-purple-400' : 'bg-cyan-500/20 text-cyan-400'}`}>
+                                                            {group.type}
+                                                        </span>
+                                                        {isRgmGroup && (
+                                                            <span className="text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded bg-orange-500 text-black shadow-[0_0_10px_rgba(249,115,22,0.5)]">
+                                                                RGM
+                                                            </span>
+                                                        )}
                                                     </div>
-                                                </a>
-                                            ) : <span className="text-[10px] text-white/20">NO PROOF</span>}
-                                        </td>
-                                        <td className="py-4 px-4">
-                                            <div className="flex gap-2">
-                                                <button onClick={() => handleVerifyAction(u, 'APPROVED')} className="px-4 py-2 bg-green-500/10 text-green-500 text-[10px] font-black rounded-lg border border-green-500/20 hover:bg-green-500 hover:text-black transition-all">APPROVE</button>
-                                                <button onClick={() => handleVerifyAction(u, 'REJECTED')} className="px-4 py-2 bg-red-500/10 text-red-500 text-[10px] font-black rounded-lg border border-red-500/20 hover:bg-red-500 hover:text-black transition-all">REJECT</button>
+                                                    <h3 className="font-bold text-lg leading-tight truncate w-48">{group.teamName}</h3>
+                                                    <p className="text-[10px] font-mono text-white/40 mt-1">{group.teamNumber}</p>
+                                                </div>
+                                                <div className="text-right">
+                                                    <div className="text-lg font-black text-green-400">₹{totalAmount}</div>
+                                                    <div className="text-[9px] text-white/40 font-bold flex items-center justify-end gap-1">
+                                                        <Users className="w-3 h-3" /> {group.count}
+                                                    </div>
+                                                    {group.members.some((m: any) => m.status === 'APPROVED') && (
+                                                        <div className="mt-1 text-[7px] font-black bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded uppercase tracking-tighter">
+                                                            Partial Squad Update
+                                                        </div>
+                                                    )}
+                                                </div>
                                             </div>
-                                        </td>
-                                    </tr>
+
+                                            {isOverCapacity && (
+                                                <div className="absolute top-2 right-2 bg-red-500/20 text-red-400 text-[8px] font-black uppercase px-2 py-1 rounded-full flex items-center gap-1">
+                                                    <AlertTriangle className="w-3 h-3" /> OVER CAPACITY ({group.count}/{maxMembers})
+                                                </div>
+                                            )}
+
+                                            {/* Preview Thumbnail */}
+                                            <div className="h-24 w-full bg-black/20 rounded-xl overflow-hidden relative border border-white/5">
+                                                {hasProof ? (
+                                                    <Image src={proofSource.screenshot_url} alt="Proof" fill className="object-cover opacity-60 group-hover:opacity-100 transition-opacity" />
+                                                ) : (
+                                                    <div className="absolute inset-0 flex items-center justify-center text-[9px] font-black uppercase text-white/20 tracking-widest">
+                                                        No Proof Uploaded
+                                                    </div>
+                                                )}
+                                                {/* UTR Badge */}
+                                                {hasProof && (
+                                                    <div className="absolute bottom-2 left-2 bg-black/60 backdrop-blur-md px-2 py-1 rounded text-[9px] font-mono text-cyan-400 border border-white/10 truncate max-w-[90%]">
+                                                        {proofSource.transaction_id || "NO ID"}
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            <div className="mt-4 flex items-center justify-between text-[10px] uppercase font-bold text-white/30">
+                                                <span>Click to Verify</span>
+                                                <div className="w-6 h-6 rounded-full border border-white/10 flex items-center justify-center group-hover:bg-white group-hover:text-black transition-colors">
+                                                    <ChevronRight className="w-3 h-3" />
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+
+                                {getAllParticipantGroups(data.users.filter((u: any) => ['PENDING', 'VERIFYING'].includes(u.status))).length === 0 && (
+                                    <div className="col-span-full py-20 text-center">
+                                        <div className="w-16 h-16 bg-white/5 rounded-full flex items-center justify-center mx-auto mb-4">
+                                            <CheckCircle2 className="w-8 h-8 text-green-500/50" />
+                                        </div>
+                                        <h3 className="text-xl font-bold text-white/40">All Clear</h3>
+                                        <p className="text-xs text-white/20 uppercase tracking-widest mt-2">No pending verifications</p>
+                                    </div>
                                 )}
-                            />
+                            </div>
                         </div>
                     )}
 
                     {activeTab === 'USERS' && (
                         <>
-                            {selectedUsers.length > 0 && (
-                                <div className="bg-orange-500/10 border border-orange-500/20 p-4 mb-4 rounded-xl flex items-center justify-between sticky top-24 z-20 backdrop-blur-md">
-                                    <div className="flex items-center gap-4">
-                                        <span className="font-bold text-orange-400 text-sm">{selectedUsers.length} Warriors Selected</span>
-                                        <button onClick={() => setSelectedUsers([])} className="text-[10px] text-white/40 hover:text-white uppercase font-bold">Clear Selection</button>
-                                    </div>
-                                    <div className="flex gap-2">
-                                        <button
-                                            onClick={handleBulkCreateTeam}
-                                            className="px-4 py-2 bg-cyan-600/20 border border-cyan-500 text-cyan-400 text-xs font-black rounded-lg hover:bg-cyan-600 hover:text-black transition-all uppercase tracking-widest"
-                                        >
-                                            Form Squad
-                                        </button>
-                                        <button
-                                            onClick={() => setMovingUser({ id: 'BULK', name: `${selectedUsers.length} Warriors` } as any)}
-                                            className="px-4 py-2 bg-orange-500 text-black text-xs font-black rounded-lg hover:bg-orange-400 transition-all uppercase tracking-widest shadow-[0_0_15px_rgba(249,115,22,0.4)]"
-                                        >
-                                            Merge into Squad
-                                        </button>
-                                    </div>
-                                </div>
-                            )}
-                            <TableLayout
-                                headers={[
-                                    <input type="checkbox" onChange={(e) => {
-                                        if (e.target.checked) setSelectedUsers(filteredUsers.map((u: any) => u.id));
-                                        else setSelectedUsers([]);
-                                    }} checked={selectedUsers.length === filteredUsers.length && filteredUsers.length > 0} className="rounded border-white/20 bg-white/5" />,
-                                    'Profile', 'Squad', 'Contact (Edit)', 'College', 'Branch', 'Status', 'Payment Proof', 'UTR (Edit)', 'Joined At', 'Actions'
-                                ]}
-                                data={filteredUsers}
-                                renderRow={(u: any) => (
-                                    <tr key={u.id} className={`border-b border-white/5 hover:bg-white/[0.01] ${selectedUsers.includes(u.id) ? 'bg-orange-500/5' : ''}`}>
-                                        <td className="py-4 px-4">
-                                            <input
-                                                type="checkbox"
-                                                checked={selectedUsers.includes(u.id)}
-                                                onChange={(e) => {
-                                                    if (e.target.checked) setSelectedUsers([...selectedUsers, u.id]);
-                                                    else setSelectedUsers(selectedUsers.filter(id => id !== u.id));
-                                                }}
-                                                className="rounded border-white/20 bg-white/5"
-                                            />
-                                        </td>
-                                        <td className="py-4 px-4">
-                                            <div className="font-bold">{u.name}</div>
-                                            <div className="text-[10px] text-white/40 uppercase font-mono">{u.reg_no}</div>
-                                            {u.is_present && <span className="mt-1 inline-flex items-center gap-1 text-[8px] font-black bg-cyan-500 text-black px-1 rounded uppercase">In Venue</span>}
-                                        </td>
-                                        <td className="py-4 px-4 overflow-hidden">
-                                            {u.squad ? (
-                                                <div className="max-w-[120px]">
-                                                    <div className="text-[10px] font-black uppercase text-purple-400 truncate">{u.squad.name}</div>
-                                                    <div className="text-[8px] font-mono text-white/20 tracking-tighter">{u.squad.unique_code}</div>
-                                                </div>
-                                            ) : (
-                                                <span className="text-[8px] font-black text-white/10 uppercase tracking-widest border border-white/5 px-2 py-0.5 rounded">Solo</span>
-                                            )}
-                                        </td>
-                                        <td className="py-4 px-4 text-xs whitespace-nowrap font-mono">
-                                            {editingId === u.id && editField === 'email' ? (
-                                                <input
-                                                    autoFocus
-                                                    value={editValue}
-                                                    onChange={(e) => setEditValue(e.target.value)}
-                                                    onBlur={() => handleInlineSave(u.id, 'email', editValue)}
-                                                    onKeyDown={(e) => e.key === 'Enter' && handleInlineSave(u.id, 'email', editValue)}
-                                                    className="bg-black/50 border border-orange-500/50 rounded px-2 py-1 w-full outline-none"
-                                                />
-                                            ) : (
-                                                <div onDoubleClick={() => { setEditingId(u.id); setEditField('email'); setEditValue(u.email); }} className="cursor-pointer hover:text-orange-400">
-                                                    {u.email}
-                                                </div>
-                                            )}
-                                            {editingId === u.id && editField === 'phone' ? (
-                                                <input
-                                                    autoFocus
-                                                    value={editValue}
-                                                    onChange={(e) => setEditValue(e.target.value)}
-                                                    onBlur={() => handleInlineSave(u.id, 'phone', editValue)}
-                                                    onKeyDown={(e) => e.key === 'Enter' && handleInlineSave(u.id, 'phone', editValue)}
-                                                    className="bg-black/50 border border-orange-500/50 rounded px-2 py-1 w-full mt-1 outline-none"
-                                                />
-                                            ) : (
-                                                <div onDoubleClick={() => { setEditingId(u.id); setEditField('phone'); setEditValue(u.phone); }} className="text-white/40 cursor-pointer hover:text-orange-400 mt-1">
-                                                    {u.phone}
-                                                </div>
-                                            )}
-                                        </td>
-                                        <td className="py-4 px-4 text-[10px] text-white/60">
-                                            <span className={`px-2 py-0.5 rounded-full ${u.college?.includes('RGM') ? 'bg-cyan-500/10 text-cyan-400' : 'bg-purple-500/10 text-purple-400'}`}>
-                                                {u.college || 'N/A'}
-                                            </span>
-                                        </td>
-                                        <td className="py-4 px-4 text-[10px] text-white/60">
-                                            {editingId === u.id && editField === 'branch' ? (
-                                                <select
-                                                    autoFocus
-                                                    value={editValue}
-                                                    onChange={(e) => handleInlineSave(u.id, 'branch', e.target.value)}
-                                                    onBlur={() => setEditingId(null)}
-                                                    className="bg-black/50 border border-orange-500/50 rounded px-1 py-1 w-full outline-none text-[10px]"
-                                                >
-                                                    <option value="">Select</option>
-                                                    {["CSE", "CSE-AIML", "CSE-DS", "CSE-BS", "EEE", "ECE", "MECH", "CIVIL", "OTHERS"].map(b => (
-                                                        <option key={b} value={b}>{b}</option>
-                                                    ))}
-                                                </select>
-                                            ) : (
-                                                <span onDoubleClick={() => { setEditingId(u.id); setEditField('branch'); setEditValue(u.branch || ""); }} className="cursor-pointer hover:text-orange-400 bg-white/5 px-2 py-0.5 rounded">
-                                                    {u.branch || 'N/A'}
-                                                </span>
-                                            )}
-                                        </td>
-                                        <td className="py-4 px-4">
-                                            <div className="relative group/status flex justify-center">
-                                                <StatusBadge status={u.status} />
-                                                <div className="absolute top-full left-1/2 -translate-x-1/2 hidden group-hover/status:flex flex-col bg-neutral-900 border border-white/10 rounded-lg shadow-2xl z-[100] p-1 mt-1">
-                                                    {['PENDING', 'APPROVED', 'REJECTED'].map(s => (
-                                                        <button
-                                                            key={s}
-                                                            onClick={() => handleInlineSave(u.id, 'status', s)}
-                                                            className="px-3 py-1.5 text-[10px] font-bold text-white/60 hover:text-white hover:bg-white/5 rounded transition-all whitespace-nowrap"
-                                                        >
-                                                            {s}
-                                                        </button>
-                                                    ))}
-                                                </div>
-                                            </div>
-                                        </td>
-                                        <td className="py-4 px-4">
-                                            {u.screenshot_url ? (
-                                                <a href={u.screenshot_url} target="_blank" rel="noreferrer" className="w-10 h-10 rounded bg-white/5 flex items-center justify-center border border-white/10 hover:border-orange-500/50 transition-all overflow-hidden relative">
-                                                    <Image src={u.screenshot_url} alt="Proof" fill className="object-cover" />
-                                                    <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
-                                                        <ExternalLink className="w-3 h-3" />
+                            <div className="flex bg-white/5 p-1 rounded-xl border border-white/10 mb-6 w-fit">
+                                <button
+                                    onClick={() => setParticipantViewMode('TABLE')}
+                                    className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${participantViewMode === 'TABLE' ? 'bg-orange-500 text-black shadow-[0_0_15px_rgba(249,115,22,0.3)]' : 'text-white/40 hover:text-white'}`}
+                                >
+                                    Detailed Table
+                                </button>
+                                <button
+                                    onClick={() => setParticipantViewMode('GROUPED')}
+                                    className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${participantViewMode === 'GROUPED' ? 'bg-orange-500 text-black shadow-[0_0_15px_rgba(249,115,22,0.3)]' : 'text-white/40 hover:text-white'}`}
+                                >
+                                    Squad/Solo Cards
+                                </button>
+                            </div>
+
+                            {participantViewMode === 'GROUPED' ? (
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-20">
+                                    {getAllParticipantGroups(filteredUsers).map(group => {
+                                        const proofSource = group.proof;
+                                        const totalAmount = group.count * 800;
+                                        const hasProof = !!proofSource?.screenshot_url;
+                                        const isAllPaid = group.members.every((m: any) => m.status === 'APPROVED');
+                                        const isRgmGroup = isRGM(group);
+                                        const maxMembers = isRgmGroup ? 4 : 5;
+                                        const isOverCapacity = group.count > maxMembers;
+
+                                        return (
+                                            <div
+                                                key={group.id}
+                                                onClick={() => setVerificationGroup(group)}
+                                                className={`bg-white/5 border border-white/5 hover:border-white/20 hover:bg-white/10 transition-all rounded-3xl p-5 cursor-pointer group relative overflow-hidden ${isAllPaid ? 'border-l-4 border-l-green-500' : 'border-l-4 border-l-yellow-500'} ${isRgmGroup ? 'border-r-4 border-r-orange-500' : ''}`}
+                                            >
+                                                <div className="flex justify-between items-start mb-4">
+                                                    <div>
+                                                        <div className="flex items-center gap-2 mb-2">
+                                                            <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded inline-block ${group.type === 'SQUAD' ? 'bg-purple-500/20 text-purple-400' : 'bg-cyan-500/20 text-cyan-400'}`}>
+                                                                {group.type}
+                                                            </span>
+                                                            {isRgmGroup && (
+                                                                <span className="text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded bg-orange-500 text-black shadow-[0_0_10px_rgba(249,115,22,0.5)]">
+                                                                    RGM
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        <h3 className="font-bold text-lg leading-tight truncate w-48 text-white">{group.teamName}</h3>
+                                                        <p className="text-[10px] font-mono text-white/40 mt-1">{group.teamNumber}</p>
                                                     </div>
-                                                </a>
-                                            ) : (
-                                                <span className="text-[10px] text-white/20">No Image</span>
-                                            )}
-                                        </td>
-                                        <td className="py-4 px-4 font-mono text-[10px] text-white/40">
-                                            {editingId === u.id && editField === 'transaction_id' ? (
-                                                <input
-                                                    autoFocus
-                                                    value={editValue}
-                                                    onChange={(e) => setEditValue(e.target.value)}
-                                                    onBlur={() => handleInlineSave(u.id, 'transaction_id', editValue)}
-                                                    onKeyDown={(e) => e.key === 'Enter' && handleInlineSave(u.id, 'transaction_id', editValue)}
-                                                    className="bg-black/50 border border-orange-500/50 rounded px-2 py-1 w-full outline-none font-mono"
-                                                />
-                                            ) : (
-                                                <div onDoubleClick={() => { setEditingId(u.id); setEditField('transaction_id'); setEditValue(u.transaction_id || ""); }} className="cursor-pointer hover:text-orange-400">
-                                                    {u.transaction_id || 'N/A'}
+                                                    <div className="text-right">
+                                                        <div className={`text-lg font-black ${isAllPaid ? 'text-green-400' : 'text-yellow-400'}`}>
+                                                            {isAllPaid ? 'PAID' : 'PENDING'}
+                                                        </div>
+                                                        <div className="text-[9px] text-white/40 font-bold flex items-center justify-end gap-1">
+                                                            <Users className="w-3 h-3" /> {group.count}
+                                                        </div>
+                                                    </div>
                                                 </div>
-                                            )}
-                                        </td>
-                                        <td className="py-4 px-4 text-[10px] text-white/20 whitespace-nowrap">{new Date(u.created_at).toLocaleString()}</td>
-                                        <td className="py-4 px-4 text-right">
-                                            <div className="flex items-center justify-end gap-2">
-                                                <button onClick={() => setEmailModal({ userId: u.id, name: u.name })} className="p-2 text-white/20 hover:text-cyan-500 hover:bg-cyan-500/10 rounded-lg transition-all" title="Send Custom Email">
-                                                    <Mail className="w-4 h-4" />
+
+                                                <div className="h-24 w-full bg-black/20 rounded-xl overflow-hidden relative border border-white/5 mb-3">
+                                                    {hasProof ? (
+                                                        <Image src={proofSource.screenshot_url} alt="Proof" fill className="object-cover opacity-60 group-hover:opacity-100 transition-opacity" />
+                                                    ) : (
+                                                        <div className="absolute inset-0 flex items-center justify-center text-[9px] font-black uppercase text-white/20 tracking-widest text-center px-4">
+                                                            {isAllPaid ? 'Verification Complete' : 'Awaiting Proof Upload'}
+                                                        </div>
+                                                    )}
+                                                </div>
+
+                                                <div className="flex items-center justify-between text-[10px] uppercase font-bold text-white/30">
+                                                    <span>View Squad Intel</span>
+                                                    <div className="w-6 h-6 rounded-full border border-white/10 flex items-center justify-center group-hover:bg-white group-hover:text-black transition-colors">
+                                                        <ChevronRight className="w-3 h-3" />
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            ) : (
+                                <>
+                                    {selectedUsers.length > 0 && (
+                                        <div className="bg-orange-500/10 border border-orange-500/20 p-4 mb-4 rounded-xl flex items-center justify-between sticky top-24 z-20 backdrop-blur-md">
+                                            <div className="flex items-center gap-4">
+                                                <span className="font-bold text-orange-400 text-sm">{selectedUsers.length} Warriors Selected</span>
+                                                <button onClick={() => setSelectedUsers([])} className="text-[10px] text-white/40 hover:text-white uppercase font-bold">Clear Selection</button>
+                                            </div>
+                                            <div className="flex gap-2">
+                                                <button
+                                                    onClick={handleBulkCreateTeam}
+                                                    className="px-4 py-2 bg-cyan-600/20 border border-cyan-500 text-cyan-400 text-xs font-black rounded-lg hover:bg-cyan-600 hover:text-black transition-all uppercase tracking-widest"
+                                                >
+                                                    Form Squad
                                                 </button>
-                                                <button onClick={() => setMovingUser(u)} className="p-2 text-white/20 hover:text-orange-500 hover:bg-orange-500/10 rounded-lg transition-all" title="Move to Squad">
-                                                    <Camera className="w-4 h-4" />
-                                                </button>
-                                                <button onClick={() => handleDeleteUser(u.id)} className="p-2 text-red-500/40 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all">
-                                                    <Trash2 className="w-4 h-4" />
+                                                <button
+                                                    onClick={() => setMovingUser({ id: 'BULK', name: `${selectedUsers.length} Warriors` } as any)}
+                                                    className="px-4 py-2 bg-orange-500 text-black text-xs font-black rounded-lg hover:bg-orange-400 transition-all uppercase tracking-widest shadow-[0_0_15px_rgba(249,115,22,0.4)]"
+                                                >
+                                                    Merge into Squad
                                                 </button>
                                             </div>
-                                        </td>
-                                    </tr>
-                                )}
-                            />
+                                        </div>
+                                    )}
+                                    <TableLayout
+                                        headers={[
+                                            <input type="checkbox" onChange={(e) => {
+                                                if (e.target.checked) setSelectedUsers(filteredUsers.map((u: any) => u.id));
+                                                else setSelectedUsers([]);
+                                            }} checked={selectedUsers.length === filteredUsers.length && filteredUsers.length > 0} className="rounded border-white/20 bg-white/5" />,
+                                            'Participant (Reg No)', 'Squad Info', 'Role', 'Contact (Email/Phone)', 'College', 'Bio (Yr/T/Br)', 'Status', 'Proof', 'Actions'
+                                        ]}
+                                        data={filteredUsers}
+                                        renderRow={(u: any) => (
+                                            <tr key={u.id} className={`border-b border-white/5 hover:bg-white/[0.01] ${selectedUsers.includes(u.id) ? 'bg-orange-500/5' : ''}`}>
+                                                <td className="py-4 px-4">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={selectedUsers.includes(u.id)}
+                                                        onChange={(e) => {
+                                                            if (e.target.checked) setSelectedUsers([...selectedUsers, u.id]);
+                                                            else setSelectedUsers(selectedUsers.filter(id => id !== u.id));
+                                                        }}
+                                                        className="rounded border-white/20 bg-white/5"
+                                                    />
+                                                </td>
+                                                <td className="py-4 px-4">
+                                                    {editingId === u.id && editField === 'name' ? (
+                                                        <input
+                                                            autoFocus
+                                                            value={editValue}
+                                                            onChange={(e) => setEditValue(e.target.value)}
+                                                            onBlur={() => handleInlineSave(u.id, 'name', editValue)}
+                                                            onKeyDown={(e) => e.key === 'Enter' && handleInlineSave(u.id, 'name', editValue)}
+                                                            className="bg-black/50 border border-orange-500/50 rounded px-2 py-1 w-full outline-none font-bold"
+                                                        />
+                                                    ) : (
+                                                        <div onDoubleClick={() => { setEditingId(u.id); setEditField('name'); setEditValue(u.name); }} className="font-bold cursor-pointer hover:text-orange-400">
+                                                            {u.name}
+                                                        </div>
+                                                    )}
+                                                    {editingId === u.id && editField === 'reg_no' ? (
+                                                        <input
+                                                            autoFocus
+                                                            value={editValue}
+                                                            onChange={(e) => setEditValue(e.target.value)}
+                                                            onBlur={() => handleInlineSave(u.id, 'reg_no', editValue)}
+                                                            onKeyDown={(e) => e.key === 'Enter' && handleInlineSave(u.id, 'reg_no', editValue)}
+                                                            className="bg-black/50 border border-orange-500/50 rounded px-2 py-0.5 w-full mt-1 outline-none text-[10px] font-mono"
+                                                        />
+                                                    ) : (
+                                                        <div onDoubleClick={() => { setEditingId(u.id); setEditField('reg_no'); setEditValue(u.reg_no); }} className="text-[10px] text-white/40 uppercase font-mono cursor-pointer hover:text-orange-400">
+                                                            {u.reg_no}
+                                                        </div>
+                                                    )}
+                                                    {u.is_present && <span className="mt-1 inline-flex items-center gap-1 text-[8px] font-black bg-cyan-500 text-black px-1 rounded uppercase">In Venue</span>}
+                                                </td>
+                                                <td className="py-4 px-4 overflow-hidden">
+                                                    {u.squad ? (
+                                                        <div className="max-w-[140px]">
+                                                            <div className="text-[11px] font-black uppercase text-purple-400 truncate">{u.squad.name}</div>
+                                                            <div className="flex items-center gap-2 mt-0.5">
+                                                                <span className="text-[9px] font-mono text-white/40">{u.squad.unique_code}</span>
+                                                                <span className={`text-[8px] font-bold px-1 rounded ${u.status === 'APPROVED' ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/20 text-yellow-500'}`}>
+                                                                    {u.status === 'APPROVED' ? 'PAID' : 'PENDING'}
+                                                                </span>
+                                                            </div>
+                                                        </div>
+                                                    ) : (
+                                                        <span className="text-[10px] font-black text-white/10 uppercase tracking-widest border border-white/5 px-2 py-0.5 rounded bg-white/[0.02]">
+                                                            LONE WOLF
+                                                        </span>
+                                                    )}
+                                                </td>
+                                                <td className="py-4 px-4">
+                                                    <div className="flex flex-col gap-1">
+                                                        <span className={`text-[9px] font-black uppercase tracking-widest w-fit px-1.5 py-0.5 rounded ${u.squad ? 'bg-purple-500/10 text-purple-400' : 'text-white/20'}`}>
+                                                            {u.squad ? 'SQUAD' : 'SOLO'}
+                                                        </span>
+                                                        {editingId === u.id && editField === 'role' ? (
+                                                            <select
+                                                                autoFocus
+                                                                value={editValue}
+                                                                onChange={(e) => handleInlineSave(u.id, 'role', e.target.value)}
+                                                                onBlur={() => setEditingId(null)}
+                                                                className="bg-black/50 border border-orange-500/50 rounded px-1 py-0.5 outline-none text-[9px] font-bold text-yellow-500"
+                                                            >
+                                                                <option value="MEMBER">MEMBER</option>
+                                                                <option value="LEADER">LEADER</option>
+                                                            </select>
+                                                        ) : (
+                                                            <div onDoubleClick={() => { setEditingId(u.id); setEditField('role'); setEditValue(u.role || "MEMBER"); }} className="cursor-pointer">
+                                                                {u.role === 'LEADER' ? (
+                                                                    <span className="text-[8px] font-bold text-yellow-500 flex items-center gap-1"><Crown className="w-3 h-3" /> LEADER</span>
+                                                                ) : (
+                                                                    <span className="text-[8px] font-bold text-white/20 uppercase">MEMBER</span>
+                                                                )}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </td>
+                                                <td className="py-4 px-4 text-xs whitespace-nowrap font-mono">
+                                                    {editingId === u.id && editField === 'email' ? (
+                                                        <input
+                                                            autoFocus
+                                                            value={editValue}
+                                                            onChange={(e) => setEditValue(e.target.value)}
+                                                            onBlur={() => handleInlineSave(u.id, 'email', editValue)}
+                                                            onKeyDown={(e) => e.key === 'Enter' && handleInlineSave(u.id, 'email', editValue)}
+                                                            className="bg-black/50 border border-orange-500/50 rounded px-2 py-1 w-full outline-none"
+                                                        />
+                                                    ) : (
+                                                        <div onDoubleClick={() => { setEditingId(u.id); setEditField('email'); setEditValue(u.email); }} className="cursor-pointer hover:text-orange-400">
+                                                            {u.email}
+                                                        </div>
+                                                    )}
+                                                    {editingId === u.id && editField === 'phone' ? (
+                                                        <input
+                                                            autoFocus
+                                                            value={editValue}
+                                                            onChange={(e) => setEditValue(e.target.value)}
+                                                            onBlur={() => handleInlineSave(u.id, 'phone', editValue)}
+                                                            onKeyDown={(e) => e.key === 'Enter' && handleInlineSave(u.id, 'phone', editValue)}
+                                                            className="bg-black/50 border border-orange-500/50 rounded px-2 py-1 w-full mt-1 outline-none"
+                                                        />
+                                                    ) : (
+                                                        <div onDoubleClick={() => { setEditingId(u.id); setEditField('phone'); setEditValue(u.phone); }} className="text-white/40 cursor-pointer hover:text-orange-400 mt-1">
+                                                            {u.phone}
+                                                        </div>
+                                                    )}
+                                                </td>
+                                                <td className="py-4 px-4 text-[10px] text-white/60">
+                                                    {editingId === u.id && editField === 'college' ? (
+                                                        <input
+                                                            autoFocus
+                                                            value={editValue}
+                                                            onChange={(e) => setEditValue(e.target.value)}
+                                                            onBlur={() => handleInlineSave(u.id, 'college', editValue)}
+                                                            onKeyDown={(e) => e.key === 'Enter' && handleInlineSave(u.id, 'college', editValue)}
+                                                            className="bg-black/50 border border-orange-500/50 rounded px-2 py-0.5 w-full outline-none"
+                                                        />
+                                                    ) : (
+                                                        <div onDoubleClick={() => { setEditingId(u.id); setEditField('college'); setEditValue(u.college || ""); }} className="flex items-center gap-2 cursor-pointer hover:text-orange-400">
+                                                            <span>{u.college || 'N/A'}</span>
+                                                            {isRGM(u) && <span className="px-1.5 py-0.5 bg-orange-500 text-black text-[8px] font-black rounded">RGM</span>}
+                                                        </div>
+                                                    )}
+                                                </td>
+                                                <td className="py-4 px-4 text-[10px] text-white/60">
+                                                    <div className="flex flex-col gap-1">
+                                                        {editingId === u.id && editField === 'year' ? (
+                                                            <select
+                                                                autoFocus
+                                                                value={editValue}
+                                                                onChange={(e) => handleInlineSave(u.id, 'year', e.target.value)}
+                                                                onBlur={() => setEditingId(null)}
+                                                                className="bg-black/50 border border-orange-500/50 rounded px-1 py-0.5 outline-none text-[9px]"
+                                                            >
+                                                                <option value="">Year</option>
+                                                                {["1", "2", "3", "4"].map(y => <option key={y} value={y}>{y} Year</option>)}
+                                                            </select>
+                                                        ) : (
+                                                            <span onDoubleClick={() => { setEditingId(u.id); setEditField('year'); setEditValue(u.year || ""); }} className="cursor-pointer hover:text-orange-400 bg-white/5 px-2 py-0.5 rounded w-fit">
+                                                                Year: {u.year || '--'}
+                                                            </span>
+                                                        )}
+
+                                                        {editingId === u.id && editField === 'tshirt_size' ? (
+                                                            <select
+                                                                autoFocus
+                                                                value={editValue}
+                                                                onChange={(e) => handleInlineSave(u.id, 'tshirt_size', e.target.value)}
+                                                                onBlur={() => setEditingId(null)}
+                                                                className="bg-black/50 border border-orange-500/50 rounded px-1 py-0.5 outline-none text-[9px]"
+                                                            >
+                                                                {["S", "M", "L", "XL", "XXL"].map(s => <option key={s} value={s}>{s}</option>)}
+                                                            </select>
+                                                        ) : (
+                                                            <span onDoubleClick={() => { setEditingId(u.id); setEditField('tshirt_size'); setEditValue(u.tshirt_size || "M"); }} className="cursor-pointer hover:text-orange-400 bg-white/5 px-2 py-0.5 rounded w-fit uppercase">
+                                                                Size: {u.tshirt_size || 'M'}
+                                                            </span>
+                                                        )}
+
+                                                        {editingId === u.id && editField === 'branch' ? (
+                                                            <select
+                                                                autoFocus
+                                                                value={editValue}
+                                                                onChange={(e) => handleInlineSave(u.id, 'branch', e.target.value)}
+                                                                onBlur={() => setEditingId(null)}
+                                                                className="bg-black/50 border border-orange-500/50 rounded px-1 py-0.5 outline-none text-[9px]"
+                                                            >
+                                                                <option value="">Branch</option>
+                                                                {["CSE", "CSE-AIML", "CSE-DS", "CSE-BS", "EEE", "ECE", "MECH", "CIVIL", "OTHERS"].map(b => (
+                                                                    <option key={b} value={b}>{b}</option>
+                                                                ))}
+                                                            </select>
+                                                        ) : (
+                                                            <span onDoubleClick={() => { setEditingId(u.id); setEditField('branch'); setEditValue(u.branch || ""); }} className="cursor-pointer hover:text-orange-400 bg-white/5 px-2 py-0.5 rounded w-fit">
+                                                                {u.branch || 'Br: --'}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                </td>
+                                                <td className="py-4 px-4">
+                                                    <div className="relative group/status flex justify-center">
+                                                        <StatusBadge status={u.status} />
+                                                        <div className="absolute top-full left-1/2 -translate-x-1/2 hidden group-hover/status:flex flex-col bg-neutral-900 border border-white/10 rounded-lg shadow-2xl z-[100] p-1 mt-1">
+                                                            {['PENDING', 'APPROVED', 'REJECTED'].map(s => (
+                                                                <button
+                                                                    key={s}
+                                                                    onClick={() => handleInlineSave(u.id, 'status', s)}
+                                                                    className="px-3 py-1.5 text-[10px] font-bold text-white/60 hover:text-white hover:bg-white/5 rounded transition-all whitespace-nowrap"
+                                                                >
+                                                                    {s}
+                                                                </button>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                </td>
+                                                <td className="py-4 px-4">
+                                                    {u.screenshot_url ? (
+                                                        <a href={u.screenshot_url} target="_blank" rel="noreferrer" className="w-10 h-10 rounded bg-white/5 flex items-center justify-center border border-white/10 hover:border-orange-500/50 transition-all overflow-hidden relative">
+                                                            <Image src={u.screenshot_url} alt="Proof" fill className="object-cover" />
+                                                            <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
+                                                                <ExternalLink className="w-3 h-3" />
+                                                            </div>
+                                                        </a>
+                                                    ) : (
+                                                        <span className="text-[10px] text-white/20">No Image</span>
+                                                    )}
+                                                </td>
+                                                <td className="py-4 px-4 font-mono text-[10px] text-white/40">
+                                                    {editingId === u.id && editField === 'transaction_id' ? (
+                                                        <input
+                                                            autoFocus
+                                                            value={editValue}
+                                                            onChange={(e) => setEditValue(e.target.value)}
+                                                            onBlur={() => handleInlineSave(u.id, 'transaction_id', editValue)}
+                                                            onKeyDown={(e) => e.key === 'Enter' && handleInlineSave(u.id, 'transaction_id', editValue)}
+                                                            className="bg-black/50 border border-orange-500/50 rounded px-2 py-1 w-full outline-none font-mono"
+                                                        />
+                                                    ) : (
+                                                        <div onDoubleClick={() => { setEditingId(u.id); setEditField('transaction_id'); setEditValue(u.transaction_id || ""); }} className="cursor-pointer hover:text-orange-400">
+                                                            {u.transaction_id || 'N/A'}
+                                                        </div>
+                                                    )}
+                                                </td>
+                                                <td className="py-4 px-4 text-[10px] text-white/20 whitespace-nowrap">{new Date(u.created_at).toLocaleString()}</td>
+                                                <td className="py-4 px-4 text-right">
+                                                    <div className="flex items-center justify-end gap-2">
+                                                        <button onClick={() => setEmailModal({ userId: u.id, name: u.name })} className="p-2 text-white/20 hover:text-cyan-500 hover:bg-cyan-500/10 rounded-lg transition-all" title="Send Custom Email">
+                                                            <Mail className="w-4 h-4" />
+                                                        </button>
+                                                        <button onClick={() => setMovingUser(u)} className="p-2 text-white/20 hover:text-orange-500 hover:bg-orange-500/10 rounded-lg transition-all" title="Move to Squad">
+                                                            <Camera className="w-4 h-4" />
+                                                        </button>
+                                                        <button onClick={() => handleDeleteUser(u.id)} className="p-2 text-red-500/40 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all">
+                                                            <Trash2 className="w-4 h-4" />
+                                                        </button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        )}
+                                    />
+                                </>
+                            )}
                         </>
                     )}
 
@@ -1639,11 +2101,11 @@ export default function MainDashboard() {
                                         <table className="w-full text-left border-collapse min-w-[1000px]">
                                             <thead className="bg-white/5">
                                                 <tr className="border-b border-white/10">
-                                                    <th className="p-4 text-[10px] uppercase tracking-widest text-white/40">Team Identification</th>
-                                                    <th className="p-4 text-[10px] uppercase tracking-widest text-white/40">Team ID</th>
+                                                    <th className="p-4 text-[10px] uppercase tracking-widest text-white/40">Team Identity</th>
+                                                    <th className="p-4 text-[10px] uppercase tracking-widest text-white/40">Ref No</th>
                                                     <th className="p-4 text-[10px] uppercase tracking-widest text-white/40">Squad Code</th>
                                                     <th className="p-4 text-[10px] uppercase tracking-widest text-white/40">Type</th>
-                                                    <th className="p-4 text-[10px] uppercase tracking-widest text-white/40">Warriors</th>
+                                                    <th className="p-4 text-[10px] uppercase tracking-widest text-white/40">Roster Snapshot</th>
                                                     <th className="p-4 text-[10px] uppercase tracking-widest text-white/40">Payment Mode</th>
                                                     <th className="p-4 text-[10px] uppercase tracking-widest text-white/40 text-right">Direct Commands</th>
                                                 </tr>
@@ -1671,7 +2133,7 @@ export default function MainDashboard() {
                                                                             {team.name}
                                                                         </div>
                                                                     )}
-                                                                    <div className="text-[9px] text-white/20 font-mono italic">ID: {team.id}</div>
+                                                                    <div className="text-[9px] text-white/20 font-mono italic max-w-[150px] truncate" title={team.id}>UUID: {team.id.split('-')[0]}...</div>
                                                                 </div>
                                                             </div>
                                                         </td>
@@ -1702,19 +2164,23 @@ export default function MainDashboard() {
                                                             </span>
                                                         </td>
                                                         <td className="p-4">
-                                                            <div className="flex -space-x-2">
-                                                                {team.members.map((m: any, idx: number) => (
-                                                                    <div key={m.id} className="w-6 h-6 rounded-full bg-neutral-800 border-2 border-neutral-900 flex items-center justify-center text-[8px] font-bold text-white/40" title={m.name}>
-                                                                        {m.name[0]}
+                                                            <div className="space-y-1">
+                                                                {team.members.slice(0, 3).map((m: any) => (
+                                                                    <div key={m.id} className="flex items-center gap-1.5" title={m.name}>
+                                                                        <div className="w-4 h-4 rounded-full bg-neutral-800 flex items-center justify-center text-[7px] font-bold text-white/60">
+                                                                            {m.name[0]}
+                                                                        </div>
+                                                                        <span className="text-[10px] text-white/60 truncate max-w-[120px]">{m.name}</span>
                                                                     </div>
                                                                 ))}
-                                                                {Array.from({ length: Math.max(0, (team.max_members || 5) - team.memberCount) }).map((_, i) => (
-                                                                    <div key={i} className="w-6 h-6 rounded-full bg-white/5 border-2 border-neutral-900 flex items-center justify-center text-[10px] text-white/10">
-                                                                        +
-                                                                    </div>
-                                                                ))}
+                                                                {team.members.length > 3 && (
+                                                                    <div className="text-[9px] text-white/30 italic pl-1">+ {team.members.length - 3} others</div>
+                                                                )}
+                                                                {team.members.length === 0 && (
+                                                                    <span className="text-[9px] text-red-500/50 italic">No Active Members</span>
+                                                                )}
                                                             </div>
-                                                            <div className="mt-1 text-[9px] font-bold text-white/30 uppercase tracking-tighter">{team.memberCount} / {team.max_members || 5} Warriors</div>
+                                                            <div className="mt-1.5 text-[9px] font-bold text-white/30 uppercase tracking-tighter border-t border-white/5 pt-1">{team.memberCount} / {team.max_members || 5} Units</div>
                                                         </td>
                                                         <td className="p-4">
                                                             <StatusBadge status={team.payment_mode} />
@@ -1839,240 +2305,263 @@ export default function MainDashboard() {
                     </div>}
                 </div>
             </main>
-            {showModal && (
-                <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-                    <motion.div
-                        initial={{ scale: 0.9, opacity: 0 }}
-                        animate={{ scale: 1, opacity: 1 }}
-                        className="bg-white/10 border border-white/20 rounded-3xl p-8 max-w-md w-full shadow-2xl"
-                    >
-                        <h3 className="text-xl font-bold mb-6">
-                            {showModal === 'TEAM_DETAILS' ? 'SQUAD INTEL' : `Add ${showModal}`}
-                        </h3>
-                        <form onSubmit={handleAdd} className="space-y-4">
-                            {showModal === 'ADMINS' && (
-                                <>
-                                    <FormInput label="Username" onChange={v => setFormData({ ...formData, username: v })} />
-                                    <FormInput label="Password" type="password" onChange={v => setFormData({ ...formData, password_hash: v })} />
-                                </>
-                            )}
-                            {showModal === 'QR' && (
-                                <>
-                                    <div className="flex bg-white/5 p-1 rounded-xl mb-6">
-                                        <button
-                                            type="button"
-                                            onClick={() => setFormData({ ...formData, bulk: true })}
-                                            className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${formData.bulk !== false ? 'bg-orange-500 text-black' : 'text-white/40 hover:text-white'}`}
-                                        >
-                                            Bulk Set (5 QR)
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => setFormData({ ...formData, bulk: false })}
-                                            className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${formData.bulk === false ? 'bg-orange-500 text-black' : 'text-white/40 hover:text-white'}`}
-                                        >
-                                            Single QR
-                                        </button>
-                                    </div>
+            {
+                showModal && (
+                    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+                        <motion.div
+                            initial={{ scale: 0.9, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            className="bg-white/10 border border-white/20 rounded-3xl p-8 max-w-md w-full shadow-2xl"
+                        >
+                            <h3 className="text-xl font-bold mb-6">
+                                {showModal === 'TEAM_DETAILS' ? 'SQUAD INTEL' : `Add ${showModal}`}
+                            </h3>
+                            <form onSubmit={handleAdd} className="space-y-4">
+                                {showModal === 'ADMINS' && (
+                                    <>
+                                        <FormInput label="Username" onChange={v => setFormData({ ...formData, username: v })} />
+                                        <FormInput label="Password" type="password" onChange={v => setFormData({ ...formData, password_hash: v })} />
+                                    </>
+                                )}
+                                {showModal === 'QR' && (
+                                    <>
+                                        <div className="flex bg-white/5 p-1 rounded-xl mb-6">
+                                            <button
+                                                type="button"
+                                                onClick={() => setFormData({ ...formData, bulk: true })}
+                                                className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${formData.bulk !== false ? 'bg-orange-500 text-black' : 'text-white/40 hover:text-white'}`}
+                                            >
+                                                Bulk Set (5 QR)
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => setFormData({ ...formData, bulk: false })}
+                                                className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${formData.bulk === false ? 'bg-orange-500 text-black' : 'text-white/40 hover:text-white'}`}
+                                            >
+                                                Single QR
+                                            </button>
+                                        </div>
 
-                                    <FormInput label="Set Name / UPI Name" placeholder="Set A / TechSprint Main" value={formData.upi_name} onChange={v => setFormData({ ...formData, upi_name: v })} />
-                                    <FormInput label="UPI ID" placeholder="event@upi" value={formData.upi_id} onChange={v => setFormData({ ...formData, upi_id: v })} />
+                                        <FormInput label="Set Name / UPI Name" placeholder="Set A / Hackathon Main" value={formData.upi_name || ""} onChange={v => setFormData({ ...formData, upi_name: v })} />
+                                        <FormInput label="UPI ID" placeholder="event@upi" value={formData.upi_id || ""} onChange={v => setFormData({ ...formData, upi_id: v })} />
 
-                                    {formData.bulk !== false ? (
-                                        <div className="grid grid-cols-1 gap-3 mt-4">
-                                            {[800, 1600, 2400, 3200, 4000].map(amt => (
-                                                <FormFile
-                                                    key={amt}
-                                                    label={`QR Image for ₹${amt}`}
-                                                    file={formData[`qr_file_${amt}`]}
-                                                    onChange={file => setFormData({ ...formData, [`qr_file_${amt}`]: file })}
-                                                />
-                                            ))}
-                                            <FormInput label="Daily Limit (Each)" type="number" placeholder="100" value={formData.daily_limit?.toString()} onChange={v => setFormData({ ...formData, daily_limit: parseInt(v) })} />
-                                        </div>
-                                    ) : (
-                                        <div className="space-y-4 mt-4">
-                                            <FormFile label="QR Image File" file={formData.qr_file} onChange={file => setFormData({ ...formData, qr_file: file })} />
-                                            <FormInput label="Amount (₹)" type="number" placeholder="800" value={formData.amount?.toString()} onChange={v => setFormData({ ...formData, amount: parseInt(v) })} />
-                                            <FormInput label="Daily Limit" type="number" placeholder="100" value={formData.daily_limit?.toString()} onChange={v => setFormData({ ...formData, daily_limit: parseInt(v) })} />
-                                        </div>
-                                    )}
-                                </>
-                            )}
-                            {showModal === 'EMAILS' && (
-                                <>
-                                    <FormInput label="Email Address" onChange={v => setFormData({ ...formData, email_address: v })} />
-                                    <FormInput label="App Password" type="password" onChange={v => setFormData({ ...formData, app_password: v })} />
-                                    <FormInput label="Sender Name" placeholder="TechSprint Admin" onChange={v => setFormData({ ...formData, sender_name: v })} />
-                                    <div className="flex gap-4">
-                                        <div className="flex-2">
-                                            <FormInput label="SMTP Host" placeholder="smtp.gmail.com" onChange={v => setFormData({ ...formData, smtp_host: v })} />
-                                        </div>
-                                        <div className="flex-1">
-                                            <FormInput label="SMTP Port" placeholder="465" onChange={v => setFormData({ ...formData, smtp_port: v })} />
-                                        </div>
-                                    </div>
-                                </>
-                            )}
-                            {showModal === 'TEAMS' && (
-                                <>
-                                    <FormInput label="Team Name" onChange={v => setFormData({ ...formData, name: v })} />
-                                    <FormSelect label="Payment Mode" options={['INDIVIDUAL', 'BULK']} onChange={v => setFormData({ ...formData, payment_mode: v })} />
-                                </>
-                            )}
-                            {showModal === 'GROUPS' && (
-                                <>
-                                    <FormSelect label="College" options={['RGM', 'OTHERS']} onChange={v => setFormData({ ...formData, college: v })} />
-                                    <FormInput label="WhatsApp Link" onChange={v => setFormData({ ...formData, whatsapp_link: v })} />
-                                </>
-                            )}
-
-                            {editField === 'TEAM_MEMBERS' && (
-                                <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
-                                    <div className="mb-4">
-                                        <div className="text-[10px] text-white/20 uppercase font-black tracking-widest mb-1">Squad ID Reference</div>
-                                        <div className="text-xs font-mono text-orange-400 bg-orange-400/5 px-2 py-1 rounded border border-orange-400/10 inline-block">{editingId}</div>
-                                    </div>
-                                    {data.users.filter((u: any) => u.team_id === editingId).map((u: any) => (
-                                        <div key={u.id} className="flex items-center justify-between p-4 bg-white/5 border border-white/10 rounded-2xl group hover:border-cyan-500/30 transition-all">
-                                            <div className="flex items-center gap-4">
-                                                <div className="w-10 h-10 rounded-full bg-cyan-500/10 flex items-center justify-center font-black text-xs text-cyan-400 border border-cyan-500/20 shadow-[0_0_10px_rgba(6,182,212,0.1)]">{u.name[0]}</div>
-                                                <div>
-                                                    <div className="font-black text-sm uppercase text-white group-hover:text-cyan-400 transition-colors">{u.name}</div>
-                                                    <div className="text-[10px] text-white/40 tracking-wider font-mono">{u.reg_no} • {u.role || 'Member'}</div>
-                                                    <div className="text-[9px] text-white/20 mt-1 uppercase font-bold">{u.email}</div>
-                                                </div>
+                                        {formData.bulk !== false ? (
+                                            <div className="grid grid-cols-1 gap-3 mt-4">
+                                                {[800, 1600, 2400, 3200, 4000].map(amt => (
+                                                    <FormFile
+                                                        key={amt}
+                                                        label={`QR Image for ₹${amt}`}
+                                                        file={formData[`qr_file_${amt}`]}
+                                                        onChange={file => setFormData({ ...formData, [`qr_file_${amt}`]: file })}
+                                                    />
+                                                ))}
+                                                <FormInput label="Daily Limit (Each)" type="number" placeholder="100" value={formData.daily_limit?.toString() || ""} onChange={v => setFormData({ ...formData, daily_limit: parseInt(v) })} />
                                             </div>
-                                            <div className="flex flex-col items-end gap-2">
-                                                <StatusBadge status={u.status} />
-                                                <div className="flex gap-2">
-                                                    <button onClick={() => { setViewMember(u); }} className="text-[8px] font-black text-orange-500 hover:text-orange-400 uppercase tracking-tighter">Bio</button>
-                                                    <div className="w-[1px] h-2 bg-white/10" />
-                                                    <button onClick={() => { if (confirm(`Remove ${u.name} from this squad?`)) handleMoveMember(u.id, ""); }} className="text-[8px] font-black text-red-500 hover:text-red-400 uppercase tracking-tighter">Kick</button>
-                                                </div>
+                                        ) : (
+                                            <div className="space-y-4 mt-4">
+                                                <FormFile label="QR Image File" file={formData.qr_file} onChange={file => setFormData({ ...formData, qr_file: file })} />
+                                                <FormInput label="Amount (₹)" type="number" placeholder="800" value={formData.amount?.toString() || ""} onChange={v => setFormData({ ...formData, amount: parseInt(v) })} />
+                                                <FormInput label="Daily Limit" type="number" placeholder="100" value={formData.daily_limit?.toString() || ""} onChange={v => setFormData({ ...formData, daily_limit: parseInt(v) })} />
+                                            </div>
+                                        )}
+                                    </>
+                                )}
+                                {showModal === 'EMAILS' && (
+                                    <>
+                                        <FormInput label="Email Address" onChange={v => setFormData({ ...formData, email_address: v })} />
+                                        <FormInput label="App Password" type="password" onChange={v => setFormData({ ...formData, app_password: v })} />
+                                        <FormInput label="Sender Name" placeholder="Hackathon Admin" onChange={v => setFormData({ ...formData, sender_name: v })} />
+                                        <div className="flex gap-4">
+                                            <div className="flex-2">
+                                                <FormInput label="SMTP Host" placeholder="smtp.gmail.com" onChange={v => setFormData({ ...formData, smtp_host: v })} />
+                                            </div>
+                                            <div className="flex-1">
+                                                <FormInput label="SMTP Port" placeholder="465" onChange={v => setFormData({ ...formData, smtp_port: v })} />
                                             </div>
                                         </div>
-                                    ))}
-                                    {data.users.filter((u: any) => u.team_id === editingId).length === 0 && (
-                                        <div className="text-center py-12 border-2 border-dashed border-white/5 rounded-3xl">
-                                            <ShieldAlert className="w-8 h-8 text-white/10 mx-auto mb-2" />
-                                            <p className="text-white/20 uppercase font-black tracking-widest text-[10px]">No active units in sector</p>
+                                    </>
+                                )}
+                                {showModal === 'TEAMS' && (
+                                    <>
+                                        <FormInput label="Team Name" onChange={v => setFormData({ ...formData, name: v })} />
+                                        <FormSelect label="Payment Mode" options={['INDIVIDUAL', 'BULK']} onChange={v => setFormData({ ...formData, payment_mode: v })} />
+                                    </>
+                                )}
+                                {showModal === 'GROUPS' && (
+                                    <>
+                                        <FormSelect label="College" options={['RGM', 'OTHERS']} onChange={v => setFormData({ ...formData, college: v })} />
+                                        <FormInput label="WhatsApp Link" onChange={v => setFormData({ ...formData, whatsapp_link: v })} />
+                                    </>
+                                )}
+
+                                {editField === 'TEAM_MEMBERS' && (
+                                    <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
+                                        <div className="mb-4">
+                                            <div className="text-[10px] text-white/20 uppercase font-black tracking-widest mb-1">Squad ID Reference</div>
+                                            <div className="text-xs font-mono text-orange-400 bg-orange-400/5 px-2 py-1 rounded border border-orange-400/10 inline-block">{editingId}</div>
                                         </div>
-                                    )}
-                                </div>
-                            )}
+                                        {data.users.filter((u: any) => u.team_id === editingId).map((u: any) => (
+                                            <div key={u.id} className="flex items-center justify-between p-4 bg-white/5 border border-white/10 rounded-2xl group hover:border-cyan-500/30 transition-all">
+                                                <div className="flex items-center gap-4">
+                                                    <div className="w-10 h-10 rounded-full bg-cyan-500/10 flex items-center justify-center font-black text-xs text-cyan-400 border border-cyan-500/20 shadow-[0_0_10px_rgba(6,182,212,0.1)]">{u.name[0]}</div>
+                                                    <div>
+                                                        <div className="font-black text-sm uppercase text-white group-hover:text-cyan-400 transition-colors">{u.name}</div>
+                                                        <div className="text-[10px] text-white/40 tracking-wider font-mono">{u.reg_no} • {u.role || 'Member'}</div>
+                                                        <div className="text-[9px] text-white/20 mt-1 uppercase font-bold">{u.email}</div>
+                                                    </div>
+                                                </div>
+                                                <div className="flex flex-col items-end gap-2">
+                                                    <StatusBadge status={u.status} />
+                                                    <div className="flex gap-2">
+                                                        <button onClick={() => { setViewMember(u); }} className="text-[8px] font-black text-orange-500 hover:text-orange-400 uppercase tracking-tighter">Bio</button>
+                                                        <div className="w-[1px] h-2 bg-white/10" />
+                                                        <button onClick={() => { if (confirm(`Remove ${u.name} from this squad?`)) handleMoveMember(u.id, ""); }} className="text-[8px] font-black text-red-500 hover:text-red-400 uppercase tracking-tighter">Kick</button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ))}
+                                        {data.users.filter((u: any) => u.team_id === editingId).length === 0 && (
+                                            <div className="text-center py-12 border-2 border-dashed border-white/5 rounded-3xl">
+                                                <ShieldAlert className="w-8 h-8 text-white/10 mx-auto mb-2" />
+                                                <p className="text-white/20 uppercase font-black tracking-widest text-[10px]">No active units in sector</p>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
 
-                            {editField !== 'TEAM_MEMBERS' && (
-                                <div className="flex gap-4 mt-8">
-                                    <button type="button" onClick={() => setShowModal(null)} className="flex-1 py-3 bg-white/5 rounded-xl font-bold hover:bg-white/10 transition-all">Cancel</button>
-                                    <button type="submit" disabled={loading} className="flex-1 py-3 bg-gradient-to-r from-orange-500 to-red-600 rounded-xl font-bold hover:opacity-90 transition-all flex items-center justify-center gap-2">
-                                        {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Confirm Add'}
-                                    </button>
-                                </div>
-                            )}
+                                {editField !== 'TEAM_MEMBERS' && (
+                                    <div className="flex gap-4 mt-8">
+                                        <button type="button" onClick={() => setShowModal(null)} className="flex-1 py-3 bg-white/5 rounded-xl font-bold hover:bg-white/10 transition-all">Cancel</button>
+                                        <button type="submit" disabled={loading} className="flex-1 py-3 bg-gradient-to-r from-orange-500 to-red-600 rounded-xl font-bold hover:opacity-90 transition-all flex items-center justify-center gap-2">
+                                            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Confirm Add'}
+                                        </button>
+                                    </div>
+                                )}
 
-                            {editField === 'TEAM_MEMBERS' && (
-                                <button type="button" onClick={() => setShowModal(null)} className="w-full mt-6 py-3 bg-white/10 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-white/20 transition-all border border-white/10">Close Intel Report</button>
-                            )}
-                        </form>
-                    </motion.div>
-                </div>
-            )}
+                                {editField === 'TEAM_MEMBERS' && (
+                                    <button type="button" onClick={() => setShowModal(null)} className="w-full mt-6 py-3 bg-white/10 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-white/20 transition-all border border-white/10">Close Intel Report</button>
+                                )}
+                            </form>
+                        </motion.div>
+                    </div>
+                )
+            }
 
-            {movingUser && (
-                <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
-                    <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-neutral-900 border border-white/10 p-8 rounded-3xl max-w-md w-full shadow-2xl">
-                        <h3 className="text-xl font-black mb-2 uppercase italic tracking-tighter">Reassign Warrior</h3>
-                        <p className="text-white/40 text-[10px] uppercase font-bold mb-6 tracking-widest">Moving {movingUser.name} to new squad</p>
+            {
+                movingUser && (
+                    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
+                        <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-neutral-900 border border-white/10 p-8 rounded-3xl max-w-md w-full shadow-2xl">
+                            <h3 className="text-xl font-black mb-2 uppercase italic tracking-tighter">Reassign Warrior</h3>
+                            <p className="text-white/40 text-[10px] uppercase font-bold mb-6 tracking-widest">Moving {movingUser.name} to new squad</p>
 
-                        <div className="space-y-4 max-h-[40vh] overflow-y-auto pr-2">
-                            <button onClick={() => handleMoveMember(movingUser.id, "")} className="w-full text-left p-4 bg-white/5 border border-white/10 rounded-xl hover:bg-red-500/10 hover:border-red-500/50 transition-all group">
-                                <div className="font-bold text-sm group-hover:text-red-500">REMOVE FROM ALL TEAMS</div>
-                                <div className="text-[10px] text-white/20 uppercase">Convert to Independent Unit</div>
-                            </button>
-                            {data.teams.map((t: any) => (
-                                <button key={t.id} onClick={() => handleMoveMember(movingUser.id, t.id)} className="w-full text-left p-4 bg-white/5 border border-white/10 rounded-xl hover:border-orange-500/50 transition-all">
-                                    <div className="font-bold text-sm uppercase">{t.name}</div>
-                                    <div className="text-[10px] text-white/20 uppercase font-mono">{t.unique_code} • {t.memberCount}/{t.max_members} Units</div>
+                            <div className="space-y-4 max-h-[40vh] overflow-y-auto pr-2">
+                                <button onClick={() => handleMoveMember(movingUser.id, "")} className="w-full text-left p-4 bg-white/5 border border-white/10 rounded-xl hover:bg-red-500/10 hover:border-red-500/50 transition-all group">
+                                    <div className="font-bold text-sm group-hover:text-red-500">REMOVE FROM ALL TEAMS</div>
+                                    <div className="text-[10px] text-white/20 uppercase">Convert to Independent Unit</div>
                                 </button>
-                            ))}
-                        </div>
-                        <button onClick={() => setMovingUser(null)} className="w-full mt-6 py-3 bg-white/5 border border-white/10 rounded-xl font-bold text-xs uppercase tracking-widest">Abort Relocation</button>
-                    </motion.div>
-                </div>
-            )}
-
-            {recruitState && (
-                <RecruitModal
-                    users={data.users}
-                    onClose={() => setRecruitState(null)}
-                    onSelect={(userId: string) => {
-                        if (recruitState.teamId.startsWith('SOLO_CONVERT:')) {
-                            const soloId = recruitState.teamId.split(':')[1];
-                            handleConvertSoloToTeam(soloId, userId);
-                        } else {
-                            handleMoveMember(userId, recruitState.teamId);
-                        }
-                        setRecruitState(null);
-                    }}
-                />
-            )}
-
-            {viewMember && (
-                <MemberDetailModal
-                    user={viewMember}
-                    onClose={() => setViewMember(null)}
-                />
-            )}
-
-            {emailModal && (
-                <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
-                    <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-neutral-900 border border-white/10 p-8 rounded-3xl max-w-lg w-full shadow-2xl space-y-6">
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <h3 className="text-xl font-black uppercase italic tracking-tighter">Custom Dispatch</h3>
-                                <p className="text-white/40 text-[10px] uppercase font-bold tracking-widest">To: {emailModal.name}</p>
+                                {data.teams.map((t: any) => (
+                                    <button key={t.id} onClick={() => handleMoveMember(movingUser.id, t.id)} className="w-full text-left p-4 bg-white/5 border border-white/10 rounded-xl hover:border-orange-500/50 transition-all">
+                                        <div className="font-bold text-sm uppercase">{t.name}</div>
+                                        <div className="text-[10px] text-white/20 uppercase font-mono">{t.unique_code} • {t.memberCount}/{t.max_members} Units</div>
+                                    </button>
+                                ))}
                             </div>
-                            <button onClick={() => setEmailModal(null)} className="p-2 hover:bg-white/5 rounded-lg text-white/40"><X className="w-5 h-5" /></button>
-                        </div>
+                            <button onClick={() => setMovingUser(null)} className="w-full mt-6 py-3 bg-white/5 border border-white/10 rounded-xl font-bold text-xs uppercase tracking-widest">Abort Relocation</button>
+                        </motion.div>
+                    </div>
+                )
+            }
 
-                        <div className="space-y-4">
-                            <div className="space-y-1">
-                                <label className="text-[10px] uppercase font-bold text-white/30 ml-1">Subject Header</label>
-                                <input
-                                    type="text"
-                                    value={emailSubject}
-                                    onChange={(e) => setEmailSubject(e.target.value)}
-                                    placeholder="Enter email subject..."
-                                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 outline-none focus:border-cyan-500/50 transition-all font-bold text-sm"
-                                />
-                            </div>
-                            <div className="space-y-1">
-                                <label className="text-[10px] uppercase font-bold text-white/30 ml-1">Transmission Content</label>
-                                <textarea
-                                    value={emailMessage}
-                                    onChange={(e) => setEmailMessage(e.target.value)}
-                                    placeholder="Write your message here..."
-                                    rows={5}
-                                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 outline-none focus:border-cyan-500/50 transition-all text-sm font-medium resize-none"
-                                />
-                            </div>
-                        </div>
+            {
+                recruitState && (
+                    <RecruitModal
+                        users={data.users}
+                        onClose={() => setRecruitState(null)}
+                        onSelect={(userId: string) => {
+                            if (recruitState.teamId.startsWith('SOLO_CONVERT:')) {
+                                const soloId = recruitState.teamId.split(':')[1];
+                                handleConvertSoloToTeam(soloId, userId);
+                            } else {
+                                handleMoveMember(userId, recruitState.teamId);
+                            }
+                            setRecruitState(null);
+                        }}
+                    />
+                )
+            }
 
-                        <div className="flex gap-4">
-                            <button onClick={() => setEmailModal(null)} className="flex-1 py-3 bg-white/5 rounded-xl font-bold hover:bg-white/10 transition-all text-xs uppercase">Cancel</button>
-                            <button
-                                onClick={handleSendEmail}
-                                disabled={loading || !emailSubject || !emailMessage}
-                                className="flex-1 py-3 bg-gradient-to-r from-cyan-500 to-blue-600 rounded-xl font-bold hover:opacity-90 transition-all flex items-center justify-center gap-2 text-xs uppercase"
-                            >
-                                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Mail className="w-4 h-4" /> Send Email</>}
-                            </button>
-                        </div>
-                    </motion.div>
-                </div>
-            )}
-        </div>
+            {
+                viewMember && (
+                    <MemberDetailModal
+                        user={viewMember}
+                        onClose={() => setViewMember(null)}
+                        onSave={handleInlineSave}
+                    />
+                )
+            }
+
+            {
+                emailModal && (
+                    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
+                        <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-neutral-900 border border-white/10 p-8 rounded-3xl max-w-lg w-full shadow-2xl space-y-6">
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <h3 className="text-xl font-black uppercase italic tracking-tighter">Custom Dispatch</h3>
+                                    <p className="text-white/40 text-[10px] uppercase font-bold tracking-widest">To: {emailModal.name}</p>
+                                </div>
+                                <button onClick={() => setEmailModal(null)} className="p-2 hover:bg-white/5 rounded-lg text-white/40"><X className="w-5 h-5" /></button>
+                            </div>
+
+                            <div className="space-y-4">
+                                <div className="space-y-1">
+                                    <label className="text-[10px] uppercase font-bold text-white/30 ml-1">Subject Header</label>
+                                    <input
+                                        type="text"
+                                        value={emailSubject}
+                                        onChange={(e) => setEmailSubject(e.target.value)}
+                                        placeholder="Enter email subject..."
+                                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 outline-none focus:border-cyan-500/50 transition-all font-bold text-sm"
+                                    />
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-[10px] uppercase font-bold text-white/30 ml-1">Transmission Content</label>
+                                    <textarea
+                                        value={emailMessage}
+                                        onChange={(e) => setEmailMessage(e.target.value)}
+                                        placeholder="Write your message here..."
+                                        rows={5}
+                                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 outline-none focus:border-cyan-500/50 transition-all text-sm font-medium resize-none"
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="flex gap-4">
+                                <button onClick={() => setEmailModal(null)} className="flex-1 py-3 bg-white/5 rounded-xl font-bold hover:bg-white/10 transition-all text-xs uppercase">Cancel</button>
+                                <button
+                                    onClick={handleSendEmail}
+                                    disabled={loading || !emailSubject || !emailMessage}
+                                    className="flex-1 py-3 bg-gradient-to-r from-cyan-500 to-blue-600 rounded-xl font-bold hover:opacity-90 transition-all flex items-center justify-center gap-2 text-xs uppercase"
+                                >
+                                    {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Mail className="w-4 h-4" /> Send Email</>}
+                                </button>
+                            </div>
+                        </motion.div>
+                    </div>
+                )
+            }
+
+            {
+                verificationGroup && (
+                    <VerificationGroupModal
+                        group={verificationGroup}
+                        onClose={() => setVerificationGroup(null)}
+                        onApprove={handleGroupApprove}
+                        onReject={handleGroupReject}
+                        onApproveMember={handleApproveMember}
+                    />
+                )
+            }
+        </div >
     );
 }
 
@@ -2171,8 +2660,8 @@ function StatusBadge({ status }: { status: string }) {
         VERIFYING: "bg-yellow-500/10 text-yellow-500",
         APPROVED: "bg-green-500/10 text-green-400",
         REJECTED: "bg-red-500/10 text-red-400",
-        BULK: "bg-purple-500/10 text-purple-400",
-        INDIVIDUAL: "bg-cyan-500/10 text-cyan-400"
+        PAID: "bg-green-500/10 text-green-400",
+        PENDING_PAY: "bg-yellow-500/10 text-yellow-500"
     };
     return (
         <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${styles[status] || "bg-white/5 text-white/40"}`}>
@@ -2217,14 +2706,9 @@ function SquadRow({ team, members, onRecruit, onKick, onEdit, onViewMember, onDe
                 </div>
                 {!isVirtual && (
                     <div className="flex items-center gap-2">
-                        <select
-                            value={team.payment_mode}
-                            onChange={(e) => onEdit('payment_mode', e.target.value)}
-                            className={`px-2 py-1 rounded text-[9px] font-black uppercase tracking-widest bg-black/40 border border-white/10 outline-none transition-all cursor-pointer ${team.payment_mode === 'BULK' ? 'text-purple-400 border-purple-500/20' : 'text-blue-400 border-blue-500/20'}`}
-                        >
-                            <option value="INDIVIDUAL">INDV</option>
-                            <option value="BULK">BULK</option>
-                        </select>
+                        <span className={`px-2 py-1 rounded text-[9px] font-black uppercase tracking-widest border transition-all ${team.members?.every((m: any) => m.status === 'APPROVED') ? 'bg-green-500/10 text-green-400 border-green-500/20' : 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20'}`}>
+                            {team.members?.every((m: any) => m.status === 'APPROVED') ? 'FULL PAID' : 'PENDING_MEMBERS'}
+                        </span>
                         <button onClick={() => onEdit('max_members', (team.max_members || 5) + 1)} className="p-2 text-white/20 hover:text-cyan-400 transition-colors" title="Add Vacant Slot">
                             <PlusCircle className="w-4 h-4" />
                         </button>
