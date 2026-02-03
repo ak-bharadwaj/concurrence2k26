@@ -31,15 +31,52 @@ export async function getNextAvailableQR(amount: number = 800) {
     return available;
 }
 
+export async function resetQRUsage() {
+    const { error } = await supabase
+        .from("qr_codes")
+        .update({ today_usage: 0 })
+        .eq("active", true); // Only reset active ones or all? Usually all.
+
+    if (error) throw error;
+    return true;
+}
+
 export async function createTeam(name: string, paymentMode: "INDIVIDUAL" | "BULK" = "INDIVIDUAL", maxMembers: number = 5) {
     let team = null;
     let attempts = 0;
+
+    // Fetch the latest team_number to increment
+    const { data: lastTeam, error: lastError } = await supabase
+        .from("teams")
+        .select("team_number")
+        .not("team_number", "is", null)
+        .order("team_number", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+    if (lastError) console.error("Error fetching last team number:", lastError);
+
+    let nextNum = 0;
+    if (lastTeam?.team_number) {
+        // Extract number from A000 format
+        const match = lastTeam.team_number.match(/A(\d+)/);
+        if (match) {
+            nextNum = parseInt(match[1]) + 10;
+        }
+    }
+    const team_number = `A${nextNum.toString().padStart(3, '0')}`;
 
     while (attempts < 5) {
         const unique_code = Math.random().toString(36).substring(2, 8).toUpperCase();
         const { data, error } = await supabase
             .from("teams")
-            .insert([{ name, unique_code, payment_mode: paymentMode, max_members: maxMembers }])
+            .insert([{
+                name,
+                unique_code,
+                payment_mode: paymentMode,
+                max_members: maxMembers,
+                team_number // New column
+            }])
             .select()
             .single();
 
@@ -129,7 +166,13 @@ export async function registerUser(userData: {
         throw new Error("This registration is already locked (Approved/Pending). Please contact support for changes.");
     }
 
-    // 2. Sanitize input to prevent 'column does not exist' errors
+    // 2. Verify team_id if provided
+    if (userData.team_id) {
+        const { data: team, error: teamErr } = await supabase.from("teams").select("id").eq("id", userData.team_id).maybeSingle();
+        if (teamErr || !team) throw new Error("The specified squad does not exist.");
+    }
+
+    // 3. Sanitize input to prevent 'column does not exist' errors
     const sanitizedData = {
         name: userData.name,
         reg_no: userData.reg_no,
@@ -182,7 +225,12 @@ export async function submitPayment(userId: string, paymentData: {
 
     const isBulkLeader = user.role === 'LEADER' && user.teams?.payment_mode === 'BULK' && user.team_id;
 
-    // 2. Update the payer's status
+    // 2. Block individual payment for non-leaders in BULK mode
+    if (user.teams?.payment_mode === 'BULK' && user.role !== 'LEADER') {
+        throw new Error("This squad is in BULK payment mode. Only the squad leader can submit the team payment.");
+    }
+
+    // 3. Update the payer's status
     const { error } = await supabase
         .from("users")
         .update({
@@ -195,17 +243,17 @@ export async function submitPayment(userId: string, paymentData: {
 
     // 3. If it's a BULK leader, push all members to PENDING for verification
     if (isBulkLeader) {
+        // Only update members who are UNPAID or REJECTED
         await supabase
             .from("users")
             .update({ status: "PENDING" })
             .eq("team_id", user.team_id)
-            .neq("id", userId); // Payer is already updated above
+            .neq("id", userId)
+            .in("status", ["UNPAID", "REJECTED"]);
     }
 
-    // Increment QR usage if assigned
-    if (paymentData.assigned_qr_id) {
-        await supabase.rpc('increment_qr_usage', { qr_id: paymentData.assigned_qr_id });
-    }
+    // Send Payment Received Email (Non-blocking)
+    sendEmail(user.email, "Payment Received - TechSprint 2K26", EMAIL_TEMPLATES.PAYMENT_RECEIVED(user.name));
 
     return true;
 }
@@ -242,10 +290,8 @@ export async function updateStatus(
             .from("users")
             .update({ status: "APPROVED", verified_by: adminId })
             .eq("team_id", user.team_id)
-            .neq("status", "APPROVED");
-
-        // Note: For large teams this might fail to send emails to everyone in a non-blocking way 
-        // but for 5 members it's fine.
+            .neq("status", "APPROVED")
+            .neq("status", "REJECTED"); // Don't auto-approve someone who was specifically rejected
     }
 
     // Log action
@@ -259,14 +305,36 @@ export async function updateStatus(
 
     if (logError) console.error("Error logging action:", logError);
 
-    // Send Email Notification (Non-blocking)
+    // 4. Send Email Notification (Non-blocking)
     if (newStatus === "APPROVED") {
-        const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${user.id}`;
+        const qrUrl = (uid: string) => `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${uid}`;
+
+        // Always notify the specifically updated user
         sendEmail(
             user.email,
             "Registration Approved! 🎉 - TechSprint 2K26",
-            EMAIL_TEMPLATES.PAYMENT_VERIFIED(user.name, qrUrl, user.reg_no, whatsappLink)
+            EMAIL_TEMPLATES.PAYMENT_VERIFIED(user.name, qrUrl(user.id), user.reg_no, whatsappLink)
         );
+
+        // If it was a BULK leader, notify all newly approved members
+        if (user.role === "LEADER" && user.teams?.payment_mode === "BULK" && user.team_id) {
+            const { data: members } = await supabase
+                .from("users")
+                .select("*")
+                .eq("team_id", user.team_id)
+                .neq("id", userId)
+                .eq("status", "APPROVED"); // Only those we just flipped
+
+            if (members) {
+                members.forEach(m => {
+                    sendEmail(
+                        m.email,
+                        "Registration Approved! 🎉 - TechSprint 2K26",
+                        EMAIL_TEMPLATES.PAYMENT_VERIFIED(m.name, qrUrl(m.id), m.reg_no, whatsappLink)
+                    );
+                });
+            }
+        }
     } else if (newStatus === "REJECTED") {
         sendEmail(
             user.email,
@@ -358,19 +426,34 @@ export async function respondToJoinRequest(requestId: string, status: 'APPROVED'
 }
 
 export async function registerBulkMembers(leaderId: string, teamId: string, members: any[]) {
-    // members should be an array of user objects without team_id/role
-    const membersToInsert = members.map(m => ({
-        name: m.name,
-        reg_no: m.reg_no,
-        email: m.email,
-        phone: m.phone,
-        college: m.college || 'RGM College',
-        branch: m.branch,
-        year: m.year,
-        team_id: teamId,
-        role: 'MEMBER',
-        status: 'UNPAID'
-    }));
+    // 1. Fetch existing statuses to prevent overwriting APPROVED/PENDING users
+    const regNos = members.map(m => m.reg_no);
+    const { data: existingUsers } = await supabase
+        .from("users")
+        .select("reg_no, status")
+        .in("reg_no", regNos);
+
+    const lockedRegNos = new Set(
+        existingUsers?.filter(u => ["APPROVED", "PENDING", "VERIFYING"].includes(u.status)).map(u => u.reg_no) || []
+    );
+
+    // 2. Filter out locked members
+    const membersToInsert = members
+        .filter(m => !lockedRegNos.has(m.reg_no))
+        .map(m => ({
+            name: m.name,
+            reg_no: m.reg_no,
+            email: m.email,
+            phone: m.phone,
+            college: m.college || 'RGM College',
+            branch: m.branch,
+            year: m.year,
+            team_id: teamId,
+            role: 'MEMBER',
+            status: 'UNPAID'
+        }));
+
+    if (membersToInsert.length === 0) return [];
 
     const { data, error } = await supabase
         .from("users")
@@ -394,9 +477,17 @@ export async function removeMemberFromTeam(userId: string, teamId: string) {
     if (user.team_id !== teamId) throw new Error("User is not in this team");
     if (user.role === "LEADER") throw new Error("Team leader cannot be removed");
 
+    const { data: team } = await supabase.from("teams").select("payment_mode").eq("id", teamId).single();
+
+    const updateData: any = { team_id: null, role: "MEMBER" };
+    // If team was BULK, reset the removed user's status to UNPAID to prevent "free-riding"
+    if (team?.payment_mode === 'BULK') {
+        updateData.status = "UNPAID";
+    }
+
     const { error } = await supabase
         .from("users")
-        .update({ team_id: null, role: "MEMBER" })
+        .update(updateData)
         .eq("id", userId);
 
     if (error) throw error;
@@ -414,9 +505,17 @@ export async function leaveTeam(userId: string) {
     if (!user.team_id) throw new Error("You are not in a team");
     if (user.role === "LEADER") throw new Error("Team leader cannot leave. Delete the team instead.");
 
+    const { data: team } = await supabase.from("teams").select("payment_mode").eq("id", user.team_id).single();
+
+    const updateData: any = { team_id: null, role: "MEMBER" };
+    // If team was BULK, reset user's status to UNPAID to prevent "free-riding"
+    if (team?.payment_mode === 'BULK') {
+        updateData.status = "UNPAID";
+    }
+
     const { error } = await supabase
         .from("users")
-        .update({ team_id: null, role: "MEMBER" })
+        .update(updateData)
         .eq("id", userId);
 
     if (error) throw error;
@@ -434,10 +533,18 @@ export async function updateTeamSettings(teamId: string, settings: { name?: stri
 }
 
 export async function deleteTeam(teamId: string) {
-    // First, remove all members from the team
+    const { data: team } = await supabase.from("teams").select("payment_mode").eq("id", teamId).single();
+
+    const updateData: any = { team_id: null, role: "MEMBER" };
+    // If team was BULK, reset all members' status to UNPAID
+    if (team?.payment_mode === 'BULK') {
+        updateData.status = "UNPAID";
+    }
+
+    // First, remove all members from the team and logically reset their status
     const { error: memberErr } = await supabase
         .from("users")
-        .update({ team_id: null, role: "MEMBER" })
+        .update(updateData)
         .eq("team_id", teamId);
 
     if (memberErr) throw memberErr;
@@ -487,6 +594,12 @@ export async function addMemberToTeam(memberData: {
     }
 
     if (existingUser) {
+        // Double check capacity again for existing user joining (race condition protection)
+        const { count: finalCount } = await supabase.from("users").select("*", { count: 'exact', head: true }).eq("team_id", teamId);
+        if (finalCount !== null && finalCount >= (team?.max_members || 5)) {
+            throw new Error("The squad just hit its limit. Deployment aborted.");
+        }
+
         // Just link the existing solo user
         // Anomaly Fix: Only inherit status if payment mode is BULK
         const targetStatus = team?.payment_mode === "BULK" ? (team?.leader?.status || "PENDING") : "UNPAID";
@@ -500,11 +613,21 @@ export async function addMemberToTeam(memberData: {
             })
             .eq("id", existingUser.id);
         if (uErr) throw uErr;
+
+        // Cleanup any ghost join requests
+        await supabase.from("join_requests").delete().eq("user_id", existingUser.id).eq("team_id", teamId);
+
         return existingUser;
     } else {
         // 3. Create new user record
         const finalCollege = (college === 'OTHERS' && other_college) ? other_college : (college || team?.leader?.college);
         const targetStatus = team?.payment_mode === "BULK" ? (team?.leader?.status || "PENDING") : "UNPAID";
+
+        // Double check capacity again for new user (race condition protection)
+        const { count: finalCount } = await supabase.from("users").select("*", { count: 'exact', head: true }).eq("team_id", teamId);
+        if (finalCount !== null && finalCount >= (team?.max_members || 5)) {
+            throw new Error("The squad just hit its limit. Deployment aborted.");
+        }
 
         const { data: newUser, error: iErr } = await supabase
             .from("users")
@@ -524,6 +647,10 @@ export async function addMemberToTeam(memberData: {
             .single();
 
         if (iErr) throw iErr;
+
+        // Cleanup any ghost join requests
+        await supabase.from("join_requests").delete().eq("user_id", newUser.id).eq("team_id", teamId);
+
         return newUser;
     }
 }
@@ -536,4 +663,46 @@ export async function updateMemberDetails(userId: string, updates: any) {
 
     if (error) throw error;
     return true;
+}
+
+export async function markAttendance(userId: string, teamId: string, date: string, time: string) {
+    const { data, error } = await supabase
+        .from("attendance")
+        .upsert([{
+            user_id: userId,
+            team_id: teamId,
+            attendance_date: date,
+            attendance_time: time,
+            status: 'PRESENT'
+        }], { onConflict: 'user_id, attendance_date' })
+        .select()
+        .single();
+
+    if (error) throw error;
+    return data;
+}
+
+export async function fetchAttendanceReport(date: string) {
+    // This fetches all users and their attendance for a specific date
+    const { data: users, error: uErr } = await supabase
+        .from("users")
+        .select("id, name, reg_no, status, team_id, teams!team_id(name, team_number)");
+
+    if (uErr) throw uErr;
+
+    const { data: attendance, error: aErr } = await supabase
+        .from("attendance")
+        .select("*")
+        .eq("attendance_date", date);
+
+    if (aErr) throw aErr;
+
+    // Combine
+    return users.map(u => {
+        const record = attendance?.find(a => a.user_id === u.id);
+        return {
+            ...u,
+            attendanceStatus: record ? 'PRESENT' : 'ABSENT'
+        };
+    });
 }

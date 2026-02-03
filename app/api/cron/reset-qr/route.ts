@@ -27,7 +27,6 @@ export async function GET(request: NextRequest) {
             timestamp: new Date().toISOString()
         });
     } catch (error: any) {
-        console.error('QR reset error:', error);
         return NextResponse.json({
             error: error.message || 'Reset failed'
         }, { status: 500 });

@@ -59,7 +59,7 @@ export default function SubDashboard() {
             setLoading(true);
             const { data, error } = await supabase
                 .from("users")
-                .select("*")
+                .select("*, squad:teams!team_id(name)")
                 .order("created_at", { ascending: false });
             if (error) throw error;
 
@@ -75,7 +75,6 @@ export default function SubDashboard() {
 
             setUsers(sortedData);
         } catch (err) {
-            console.error(err);
         } finally {
             setLoading(false);
         }
@@ -92,8 +91,9 @@ export default function SubDashboard() {
                 const link = await getActiveGroupLink(user.college);
 
                 await updateStatus(user.id, admin.id, "APPROVED", "APPROVE_PAYMENT", link || "");
-                if (!link) console.warn(`[SubDashboard] No active group link found for ${user.college}`);
-                if (!link) console.warn(`[SubDashboard] No active group link found for ${user.college}, sent email without join button.`);
+                if (!link) {
+                    // No active group link found.
+                }
             } else if (action === "REJECTED") {
                 const confirm = window.confirm(`Are you sure you want to REJECT ${user.name}?`);
                 if (!confirm) return;
@@ -105,7 +105,6 @@ export default function SubDashboard() {
             } else if (action === "VERIFYING") {
                 const updatedUser = await updateStatus(user.id, admin.id, "VERIFYING", "START_VERIFICATION");
                 if (!updatedUser) {
-                    console.warn("[SubDashboard] User already updated by another admin.");
                     alert("Action failed: User status was already updated by another admin.");
                     return;
                 }
@@ -113,7 +112,6 @@ export default function SubDashboard() {
 
         } catch (err: any) {
             alert("Action failed: " + getFriendlyError(err));
-            console.error("[SubDashboard Error]", err);
         } finally {
             setProcessingId(null);
         }
@@ -135,7 +133,7 @@ export default function SubDashboard() {
                         <div className="w-8 h-8 rounded-lg bg-gradient-to-r from-cyan-500 to-purple-500 flex items-center justify-center font-bold">
                             TS
                         </div>
-                        <span className="font-bold tracking-tight">TechSprint <span className="text-cyan-400 text-xs">SUB-ADMIN</span></span>
+                        <span className="font-bold tracking-tight">TechSprint <span className="text-cyan-400 text-xs uppercase tracking-tighter">Sub-Admin</span> <span className="text-orange-500 scale-75 border border-orange-500/20 px-1 rounded bg-orange-500/5 text-[10px]">v2.1</span></span>
                     </div>
                     <div className="flex items-center gap-4">
                         <span className="text-sm text-white/40">Logged in as: <span className="text-white">{admin.username}</span></span>
@@ -179,6 +177,7 @@ export default function SubDashboard() {
                             <thead>
                                 <tr className="border-b border-white/10 text-[10px] uppercase tracking-widest text-white/40 bg-white/5">
                                     <th className="px-6 py-4">User Details</th>
+                                    <th className="px-6 py-4">Squad</th>
                                     <th className="px-6 py-4">College/Branch</th>
                                     <th className="px-6 py-4">Payment Proof</th>
                                     <th className="px-6 py-4">Status</th>
@@ -198,6 +197,15 @@ export default function SubDashboard() {
                                                 </div>
                                                 <div className="text-xs text-white/40">{user.reg_no} • {user.email}</div>
                                                 <div className="text-[10px] text-cyan-500/60 font-medium">{user.phone}</div>
+                                            </td>
+                                            <td className="px-6 py-4">
+                                                {user.squad ? (
+                                                    <div className="max-w-[150px]">
+                                                        <div className="text-[11px] font-black uppercase text-purple-400 truncate">{user.squad.name}</div>
+                                                    </div>
+                                                ) : (
+                                                    <span className="text-[9px] font-bold text-white/10 uppercase tracking-widest border border-white/5 px-2 py-0.5 rounded">Solo</span>
+                                                )}
                                             </td>
                                             <td className="px-6 py-4">
                                                 <div className="flex flex-col gap-1">

@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { Loader2, User, Users, CheckCircle, XCircle, Clock, LogOut, Ticket, Crown, MessageSquare, Send, ChevronRight, Copy, ShieldCheck, Plus, Sparkles } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { GlassNavbar } from "@/components/glass-navbar";
 import { getFriendlyError } from "@/lib/error-handler";
 import { submitSupportTicket, getUserSupportTickets } from "@/lib/support-actions";
 
@@ -76,7 +75,6 @@ export default function DashboardPage() {
             const ticketsData = await getUserSupportTickets(userId);
             setTickets(ticketsData || []);
         } catch (err: any) {
-            console.error("Dashboard error:", err?.message || err);
             setError(getFriendlyError(err));
         } finally {
             setLoading(false);
@@ -87,7 +85,7 @@ export default function DashboardPage() {
         if (debounceTimer) clearTimeout(debounceTimer);
         const timeout = setTimeout(() => {
             fetchDashboard(silent);
-        }, 10);
+        }, 200);
         setDebounceTimer(timeout);
     }, [debounceTimer, fetchDashboard]);
 
@@ -148,8 +146,6 @@ export default function DashboardPage() {
 
     if (error) return (
         <div className="min-h-screen flex items-center justify-center p-4 bg-black relative">
-            <FloatingLines />
-            <GlassNavbar />
             <div className="glass-card p-8 rounded-3xl text-center max-w-sm relative z-10">
                 <XCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
                 <h2 className="text-xl font-bold mb-2">Sync Failed</h2>
@@ -165,8 +161,6 @@ export default function DashboardPage() {
 
     return (
         <div className="min-h-screen text-white relative overflow-x-hidden selection:bg-cyan-500/30 font-sans bg-transparent">
-            <GlassNavbar />
-
             <div className="pt-28 pb-20 px-4 relative z-10">
                 <div className="max-w-5xl mx-auto space-y-8">
 
@@ -251,34 +245,34 @@ export default function DashboardPage() {
                                 </div>
                             </div>
 
-                            {user.status === 'APPROVED' ? (
-                                <div className="flex flex-col items-center justify-center text-center space-y-8 py-4">
+                            <div className="flex flex-col items-center justify-center text-center space-y-8 py-4">
+                                {user.status === 'APPROVED' ? (
                                     <div className="relative group/qr">
                                         <div className="absolute -inset-1 bg-gradient-to-r from-cyan-500 to-blue-600 rounded-[2.2rem] blur opacity-20 group-hover/qr:opacity-50 transition-opacity" />
                                         <div className="bg-white p-6 rounded-[2rem] relative shadow-2xl transform transition-transform group-hover/qr:scale-105">
                                             <img src={qrUrl} alt="Ticket QR" className="w-48 h-48 sm:w-56 sm:h-56 mix-blend-multiply" />
                                         </div>
                                     </div>
+                                ) : (
+                                    <div className="w-48 h-48 sm:w-56 sm:h-56 flex flex-col items-center justify-center text-white/20 text-center p-8 border-2 border-dashed border-white/5 rounded-[2rem] bg-black/20">
+                                        <div className="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center mb-4 animate-pulse">
+                                            <Loader2 className="w-8 h-8 animate-spin" />
+                                        </div>
+                                        <p className="text-[10px] font-black uppercase tracking-widest leading-relaxed">Permit Locked<br />Pending Approval</p>
+                                    </div>
+                                )}
 
-                                    <div className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 flex items-center justify-between">
-                                        <div className="text-left">
-                                            <p className="text-[9px] text-white/30 uppercase font-black tracking-widest">Registration ID</p>
-                                            <p className="font-mono text-xl font-black text-cyan-400 tracking-wider">{user.reg_no}</p>
-                                        </div>
-                                        <div className="text-right">
-                                            <p className="text-[9px] text-white/30 uppercase font-black tracking-widest">Sector</p>
-                                            <p className="font-mono text-xl font-black text-white tracking-wider">A-01</p>
-                                        </div>
+                                <div className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 flex items-center justify-between">
+                                    <div className="text-left">
+                                        <p className="text-[9px] text-white/30 uppercase font-black tracking-widest">Registration ID</p>
+                                        <p className="font-mono text-xl font-black text-cyan-400 tracking-wider">{user.reg_no}</p>
+                                    </div>
+                                    <div className="text-right">
+                                        <p className="text-[9px] text-white/30 uppercase font-black tracking-widest">Status</p>
+                                        <p className={`font-mono text-[10px] font-black tracking-wider uppercase ${user.status === 'APPROVED' ? 'text-green-500' : 'text-yellow-500'}`}>{user.status}</p>
                                     </div>
                                 </div>
-                            ) : (
-                                <div className="h-80 flex flex-col items-center justify-center text-white/20 text-center p-8 border-2 border-dashed border-white/5 rounded-[2rem] bg-black/20">
-                                    <div className="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center mb-4 animate-pulse">
-                                        <Loader2 className="w-8 h-8 animate-spin" />
-                                    </div>
-                                    <p className="text-xs font-black uppercase tracking-widest leading-relaxed">Permit Locked<br />Verification In Progress</p>
-                                </div>
-                            )}
+                            </div>
                         </motion.div>
 
                         {/* Squad Grid UI */}

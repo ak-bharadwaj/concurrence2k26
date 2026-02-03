@@ -28,16 +28,20 @@ import {
     Camera,
     UserCheck,
     RotateCcw,
-    PlusCircle
+    PlusCircle,
+    ShieldAlert
 } from "lucide-react";
 import { Scanner } from "@yudiel/react-qr-scanner";
+import ExcelJS from "exceljs";
 import { supabase } from "@/lib/supabase";
 import { getAdminSession, adminLogout } from "@/lib/auth";
+import { updateStatus, getActiveGroupLink, deleteUser, resetQRUsage, markAttendance, fetchAttendanceReport, sendCustomUserEmail } from "@/lib/supabase-actions";
+import { getFriendlyError } from "@/lib/error-handler";
 import Image from "next/image";
 import { MemberDetailModal } from "./MemberDetailModal";
 
 
-type Tab = "USERS" | "VERIFY_QUEUE" | "ADMINS" | "QR" | "EMAILS" | "GROUPS" | "LOGS" | "TEAMS" | "SCAN";
+type Tab = "USERS" | "VERIFY_QUEUE" | "ADMINS" | "QR" | "EMAILS" | "GROUPS" | "LOGS" | "TEAMS" | "SCAN" | "TEAM_DETAILS";
 
 const TABS: Tab[] = ["USERS", "VERIFY_QUEUE", "SCAN", "TEAMS", "EMAILS", "QR", "ADMINS", "LOGS"];
 
@@ -76,6 +80,15 @@ export default function MainDashboard() {
     const [recruitState, setRecruitState] = useState<{ teamId: string, slotId: number } | null>(null);
     const [lastSynced, setLastSynced] = useState<Date | null>(null);
 
+    // Attendance State
+    const [attendanceDate, setAttendanceDate] = useState(new Date().toISOString().split('T')[0]);
+    const [attendanceTime, setAttendanceTime] = useState(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }));
+    const [scanResult, setScanResult] = useState<any>(null);
+    const [recentScans, setRecentScans] = useState<any[]>([]);
+    const [emailModal, setEmailModal] = useState<{ userId: string, name: string } | null>(null);
+    const [emailSubject, setEmailSubject] = useState("");
+    const [emailMessage, setEmailMessage] = useState("");
+
     useEffect(() => {
         const session = getAdminSession();
         if (!session || session.role !== "MAIN") {
@@ -85,12 +98,34 @@ export default function MainDashboard() {
         setAdmin(session);
         fetchAllData();
 
-        // Real-time Subscription
+        // Real-time Subscription - Optimized for Concurrency
         const channel = supabase
             .channel('dashboard-changes')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, () => fetchAllData())
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, (payload: any) => {
+                if (payload.eventType === 'UPDATE') {
+                    setData((prev: any) => ({
+                        ...prev,
+                        users: prev.users.map((u: any) => u.id === payload.new.id ? { ...u, ...payload.new } : u)
+                    }));
+                } else {
+                    fetchAllData(); // Fallback for INS/DEL
+                }
+            })
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, (payload: any) => {
+                if (payload.eventType === 'INSERT') {
+                    // Refresh logs if we are on logs tab, or just update local counts
+                    fetchAllData();
+                }
+            })
             .on('postgres_changes', { event: '*', schema: 'public', table: 'teams' }, () => fetchAllData())
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'qr_codes' }, () => fetchAllData())
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'qr_codes' }, (payload: any) => {
+                if (payload.eventType === 'UPDATE') {
+                    setData((prev: any) => ({
+                        ...prev,
+                        qr: prev.qr.map((q: any) => q.id === payload.new.id ? { ...q, ...payload.new } : q)
+                    }));
+                }
+            })
             .subscribe();
 
         return () => {
@@ -142,6 +177,22 @@ export default function MainDashboard() {
             fetchAllData();
         } catch (e: any) {
             alert("Update failed: " + e.message);
+        }
+    };
+
+    const handleSendEmail = async () => {
+        if (!emailModal || !emailSubject || !emailMessage) return;
+        try {
+            setLoading(true);
+            await sendCustomUserEmail(emailModal.userId, emailSubject, emailMessage);
+            alert(`Email sent successfully to ${emailModal.name}!`);
+            setEmailModal(null);
+            setEmailSubject("");
+            setEmailMessage("");
+        } catch (err: any) {
+            alert("Failed to send email: " + err.message);
+        } finally {
+            setLoading(false);
         }
     };
 
@@ -261,19 +312,18 @@ export default function MainDashboard() {
         try {
             setLoading(true);
             const results = await Promise.all([
-                supabase.from("users").select("*").order("created_at", { ascending: false }),
+                supabase.from("users").select("*, squad:teams!team_id(name, unique_code, team_number)").order("created_at", { ascending: false }),
                 supabase.from("admins").select("*").order("created_at", { ascending: false }),
                 supabase.from("qr_codes").select("*").order("created_at", { ascending: false }),
                 supabase.from("email_accounts").select("*").order("created_at", { ascending: false }),
                 supabase.from("group_links").select("*").order("created_at", { ascending: false }),
-                supabase.from("action_logs").select("*, users(name), admins(username)").order("timestamp", { ascending: false }).limit(50),
-                supabase.from("teams").select("*, users(count)")
+                supabase.from("action_logs").select("*, users!user_id(name), admins(username)").order("timestamp", { ascending: false }).limit(50),
+                supabase.from("teams").select("*, members:users(id, name, status, role)")
             ]);
 
             // Robust individual error checks
             const errors = results.filter(r => r.error).map(r => r.error?.message);
             if (errors.length > 0) {
-                console.error("Supabase Fetch Errors:", errors);
                 // We show alert but still try to render what we got
                 alert("Some data failed to sync: \n" + errors.join("\n"));
             }
@@ -323,7 +373,6 @@ export default function MainDashboard() {
             });
             setLastSynced(new Date());
         } catch (err: any) {
-            console.error("Fetch Data Critical Error:", err);
             alert("Critical Error loading data: " + err.message);
         } finally {
             setLoading(false);
@@ -413,7 +462,6 @@ export default function MainDashboard() {
                             status: row.status || "PENDING"
                         }, { onConflict: 'reg_no' });
 
-                    if (error) console.error("Error upserting row:", error);
                 }
                 alert("Import completed. Some rows might have failed if they were invalid.");
                 fetchAllData();
@@ -460,6 +508,20 @@ export default function MainDashboard() {
                 return;
             }
 
+            if (field === 'status') {
+                const user = data.users.find((u: any) => u.id === id);
+                if (!user) throw new Error("User not found");
+
+                const link = value === 'APPROVED' ? await getActiveGroupLink(user.college) : "";
+                await updateStatus(id, admin.id, value as any, "MANUAL_STATUS_OVERRIDE", link || "");
+
+                setData((prev: any) => ({
+                    ...prev,
+                    users: prev.users.map((u: any) => u.id === id ? { ...u, status: value, is_present: value === 'APPROVED' } : u)
+                }));
+                return;
+            }
+
             const { error } = await supabase
                 .from("users")
                 .update({ [field]: value })
@@ -484,6 +546,35 @@ export default function MainDashboard() {
             setLoading(false);
             setEditingId(null);
             setEditField(null);
+        }
+    };
+
+    const handleVerifyAction = async (user: any, action: "APPROVED" | "REJECTED") => {
+        try {
+            setLoading(true);
+
+            if (action === "APPROVED") {
+                const confirm = window.confirm(`✅ APPROVE ${user.name}?\n\nThis will:\n- Send QR code via email\n- Grant arena access\n- Add to WhatsApp group`);
+                if (!confirm) return;
+
+                const link = await getActiveGroupLink(user.college);
+                await updateStatus(user.id, admin.id, "APPROVED", "APPROVE_PAYMENT", link || "");
+                if (!link) {
+                    // Warn if needed
+                }
+            } else if (action === "REJECTED") {
+                const confirm = window.confirm(`❌ REJECT ${user.name}?\n\nThis will:\n- Send rejection email\n- PERMANENTLY DELETE from database\n\nThis cannot be undone.`);
+                if (!confirm) return;
+
+                await updateStatus(user.id, admin.id, "REJECTED", "REJECT_PAYMENT");
+                await deleteUser(user.id);
+            }
+
+            fetchAllData();
+        } catch (err: any) {
+            alert("Action failed: " + getFriendlyError(err));
+        } finally {
+            setLoading(false);
         }
     };
 
@@ -608,6 +699,87 @@ export default function MainDashboard() {
 
         } catch (err: any) {
             alert("Export error: " + err.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleAttendanceExport = async () => {
+        try {
+            setLoading(true);
+            const reportData = await fetchAttendanceReport(attendanceDate);
+
+            if (!reportData || reportData.length === 0) {
+                alert("No attendance data found for this date.");
+                return;
+            }
+
+            const workbook = new ExcelJS.Workbook();
+            const sheet = workbook.addWorksheet(`Attendance_${attendanceDate}`);
+
+            // Header Row
+            const headerRow = sheet.getRow(1);
+            headerRow.values = ['Team Name', 'Team ID', 'Member Name', 'Reg No', 'Status', 'Attendance Status'];
+
+            // Header Styling
+            headerRow.eachCell((cell) => {
+                cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F2937' } }; // Dark Grey
+                cell.alignment = { horizontal: 'center' };
+                cell.border = {
+                    top: { style: 'thin' },
+                    left: { style: 'thin' },
+                    bottom: { style: 'thin' },
+                    right: { style: 'thin' }
+                };
+            });
+
+            // Data Rows
+            reportData.forEach((row: any) => {
+                const sheetRow = sheet.addRow([
+                    row.teams?.name || 'SOLO',
+                    row.teams?.team_number || '---',
+                    row.name,
+                    row.reg_no,
+                    row.status,
+                    row.attendanceStatus
+                ]);
+
+                // Conditional Coloring for Attendance Status
+                const statusCell = sheetRow.getCell(6);
+                if (row.attendanceStatus === 'PRESENT') {
+                    statusCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDCFCE7' } }; // Light Green
+                    statusCell.font = { color: { argb: 'FF166534' }, bold: true };
+                } else {
+                    statusCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEE2E2' } }; // Light Red
+                    statusCell.font = { color: { argb: 'FF991B1B' }, bold: true };
+                }
+
+                // Generic cell borders
+                sheetRow.eachCell((cell) => {
+                    cell.border = {
+                        top: { style: 'thin' },
+                        left: { style: 'thin' },
+                        bottom: { style: 'thin' },
+                        right: { style: 'thin' }
+                    };
+                });
+            });
+
+            // Column Widths
+            sheet.columns = [
+                { width: 25 }, { width: 15 }, { width: 25 }, { width: 15 }, { width: 15 }, { width: 20 }
+            ];
+
+            const buffer = await workbook.xlsx.writeBuffer();
+            const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `Attendance_Report_${attendanceDate}.xlsx`;
+            link.click();
+
+        } catch (err: any) {
+            alert("Attendance Export failed: " + err.message);
         } finally {
             setLoading(false);
         }
@@ -773,36 +945,69 @@ export default function MainDashboard() {
 
         try {
             setLoading(true);
-            const { data: user, error } = await supabase
-                .from("users")
-                .select("*, teams(name)")
-                .eq("reg_no", regNo)
-                .single();
+            const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(regNo) || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(regNo);
+
+            let query = supabase.from("users").select("*, squad:teams!team_id(name, team_number)");
+            if (isUUID) {
+                query = query.eq("id", regNo);
+            } else {
+                query = query.eq("reg_no", regNo);
+            }
+
+            const { data: user, error } = await query.single();
 
             if (error || !user) throw new Error("Participant not found in database.");
 
             if (user.status !== "APPROVED") {
-                alert(`🚨 ACCESS DENIED: ${user.name} has status ${user.status}. Payment verification required.`);
+                setScanResult({
+                    name: user.name,
+                    error: `ACCESS DENIED: Status ${user.status}`,
+                    status: "FAILED ❌"
+                });
                 return;
             }
 
             if (user.is_present) {
-                alert(`⚠️ DUPLICATE ENTRY: ${user.name} has already checked in.`);
+                setScanResult({
+                    name: user.name,
+                    error: "DUPLICATE ENTRY: Already checked in.",
+                    status: "WARNING ⚠️"
+                });
                 return;
             }
 
-            // Success ACK
-            const { error: upErr } = await supabase
-                .from("users")
-                .update({ is_present: true, attended_at: new Date().toISOString() })
-                .eq("id", user.id);
+            // Mark Attendance in DB
+            await markAttendance(user.id, user.team_id, attendanceDate, attendanceTime);
 
-            if (upErr) throw upErr;
+            // Set scan result for display
+            setScanResult({
+                name: user.name,
+                team: user.squad?.name || "SOLO",
+                team_number: user.squad?.team_number || "---",
+                status: "ACKNOWLEDGED ✅"
+            });
 
-            alert(`✅ ENTRY APPROVED: Welcome, ${user.name}!`);
-            fetchAllData();
+            setData((prev: any) => ({
+                ...prev,
+                users: prev.users.map((u: any) => u.id === user.id ? { ...u, is_present: true } : u)
+            }));
+
+            // Add to activity feed
+            setRecentScans(prev => [{
+                name: user.name,
+                team: user.squad?.name || "SOLO",
+                time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                id: Date.now()
+            }, ...prev].slice(0, 5));
+
+            // Auto-clear result after 5s
+            setTimeout(() => setScanResult(null), 5000);
+
+            // Fallback: still update users table is_present for backward compatibility
+            await supabase.from("users").update({ is_present: true }).eq("id", user.id);
+
         } catch (err: any) {
-            alert(err.message);
+            alert("Scan failed: " + err.message);
         } finally {
             setLoading(false);
         }
@@ -838,7 +1043,7 @@ export default function MainDashboard() {
                         <p className="text-[10px] uppercase font-bold text-white/20 mb-2 px-3 tracking-widest">Main Operations</p>
                         <NavItem icon={Users} label="Participants" active={activeTab === "USERS"} onClick={() => { setActiveTab("USERS"); setMobileMenuOpen(false); }} />
                         <NavItem icon={ShieldCheck} label="Verify Queue" active={activeTab === "VERIFY_QUEUE"} onClick={() => { setActiveTab("VERIFY_QUEUE"); setMobileMenuOpen(false); }} />
-                        <NavItem icon={QrCode} label="Scan Entry" active={activeTab === "SCAN"} onClick={() => { setActiveTab("SCAN"); setMobileMenuOpen(false); }} />
+                        <NavItem icon={QrCode} label="Take Attendance" active={activeTab === "SCAN"} onClick={() => { setActiveTab("SCAN"); setMobileMenuOpen(false); }} />
                         <NavItem icon={Menu} label="All Teams" active={activeTab === "TEAMS"} onClick={() => { setActiveTab("TEAMS"); setMobileMenuOpen(false); }} />
                     </div>
                     <NavItem icon={ShieldCheck} label="Sub Admins" active={activeTab === 'ADMINS'} onClick={() => { setActiveTab('ADMINS'); setMobileMenuOpen(false); }} />
@@ -867,7 +1072,10 @@ export default function MainDashboard() {
                             <Menu className="w-6 h-6" />
                         </button>
                         <div>
-                            <h2 className="text-sm sm:text-xl font-bold truncate max-w-[150px] sm:max-w-none">{activeTab.replace('_', ' ')} Management</h2>
+                            <h2 className="text-sm sm:text-xl font-bold truncate max-w-[150px] sm:max-w-none">
+                                {activeTab === "SCAN" ? "Attendance" : activeTab.replace('_', ' ')} Management
+                                <span className="hidden sm:inline-block text-[10px] text-orange-500 ml-2 border border-orange-500/20 px-2 py-0.5 rounded bg-orange-500/5">v2.1-SQUAD</span>
+                            </h2>
                             {lastSynced && (
                                 <p className="text-[10px] text-white/20 font-mono uppercase tracking-widest hidden sm:block">
                                     Last Sync: {lastSynced.toLocaleTimeString()}
@@ -936,48 +1144,153 @@ export default function MainDashboard() {
                 <div className="p-8">
 
                     {activeTab === 'SCAN' && (
-                        <div className="max-w-2xl mx-auto space-y-8">
+                        <div className="max-w-4xl mx-auto space-y-8">
                             <div className="text-center space-y-2">
-                                <h2 className="text-3xl font-black tracking-tighter uppercase">Nexus Entry Protocol</h2>
-                                <p className="text-white/40 text-xs font-bold tracking-widest uppercase">Align scanner with participant's Nexus ID</p>
+                                <h2 className="text-3xl font-black tracking-tighter uppercase italic">Attendance Protocol <span className="text-orange-500">v3.0</span></h2>
+                                <p className="text-white/40 text-[10px] font-black tracking-[0.2em] uppercase">Sector Attendance & Validation Subsystem</p>
                             </div>
 
-                            <div className="relative aspect-square max-w-sm mx-auto rounded-3xl overflow-hidden border-4 border-white/10 shadow-[0_0_50px_rgba(255,165,0,0.1)]">
-                                <Scanner
-                                    onScan={handleScan}
-                                    allowMultiple={true}
-                                    scanDelay={2000}
-                                    components={{
-                                        finder: true,
-                                    }}
-                                    styles={{
-                                        container: {
-                                            width: '100%',
-                                            height: '100%',
-                                        }
-                                    }}
-                                />
-                                <div className="absolute inset-0 pointer-events-none border-[40px] border-black/40" />
-                                <div className="absolute inset-0 pointer-events-none">
-                                    <div className="w-full h-0.5 bg-orange-500 absolute top-1/2 -translate-y-1/2 animate-scan-line shadow-[0_0_15px_rgba(249,115,22,0.8)]" />
-                                </div>
-                            </div>
+                            <div className="flex flex-col md:flex-row gap-8 items-start">
+                                {/* Left: Controls & Stats */}
+                                <div className="flex-1 space-y-6 w-full">
+                                    <div className="bg-white/5 border border-white/10 p-6 rounded-3xl space-y-4 shadow-xl">
+                                        <div className="flex items-center gap-3 mb-2">
+                                            <div className="w-2 h-2 rounded-full bg-orange-500 animate-pulse" />
+                                            <span className="text-[10px] font-black uppercase tracking-widest text-white/60">Session Configuration</span>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <div className="space-y-1">
+                                                <label className="text-[9px] uppercase font-black text-white/20 ml-1">Event Date</label>
+                                                <input
+                                                    type="date"
+                                                    value={attendanceDate}
+                                                    onChange={(e) => setAttendanceDate(e.target.value)}
+                                                    className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 outline-none focus:border-orange-500/50 transition-all text-sm font-mono"
+                                                />
+                                            </div>
+                                            <div className="space-y-1">
+                                                <label className="text-[9px] uppercase font-black text-white/20 ml-1">Session Time</label>
+                                                <input
+                                                    type="time"
+                                                    value={attendanceTime}
+                                                    onChange={(e) => setAttendanceTime(e.target.value)}
+                                                    className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 outline-none focus:border-orange-500/50 transition-all text-sm font-mono"
+                                                />
+                                            </div>
+                                        </div>
 
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="bg-white/5 border border-white/10 p-6 rounded-2xl text-center">
-                                    <div className="text-2xl font-black text-cyan-400">{data.users.filter((u: any) => u.is_present).length}</div>
-                                    <div className="text-[10px] text-white/40 uppercase font-black tracking-widest mt-1">Inside Venue</div>
-                                </div>
-                                <div className="bg-white/5 border border-white/10 p-6 rounded-2xl text-center">
-                                    <div className="text-2xl font-black text-white/20">{data.users.filter((u: any) => !u.is_present && u.status === 'APPROVED').length}</div>
-                                    <div className="text-[10px] text-white/40 uppercase font-black tracking-widest mt-1">Pending Entry</div>
-                                </div>
-                            </div>
+                                        <button
+                                            onClick={handleAttendanceExport}
+                                            className="w-full mt-2 flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-green-500/20 to-emerald-500/20 border border-green-500/30 text-green-400 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-green-500 hover:text-black transition-all group"
+                                        >
+                                            <Download className="w-4 h-4 group-hover:scale-110 transition-transform" />
+                                            Generate Session Report
+                                        </button>
+                                    </div>
 
-                            <div className="flex justify-center">
-                                <button onClick={fetchAllData} className="flex items-center gap-2 px-6 py-3 bg-white/5 border border-white/10 rounded-xl hover:bg-white/10 transition-all text-[10px] font-black uppercase tracking-widest">
-                                    <RotateCcw className="w-4 h-4" /> Reset Sensor Array
-                                </button>
+                                    {scanResult && (
+                                        <motion.div
+                                            initial={{ opacity: 0, scale: 0.95 }}
+                                            animate={{ opacity: 1, scale: 1 }}
+                                            className={`border p-6 rounded-3xl space-y-4 shadow-xl transition-colors duration-500 ${scanResult.error ? 'bg-red-500/10 border-red-500/30' :
+                                                scanResult.status.includes('WARNING') ? 'bg-orange-500/10 border-orange-500/30' :
+                                                    'bg-cyan-500/5 border-cyan-500/20'
+                                                }`}
+                                        >
+                                            <div className="flex items-center justify-between">
+                                                <span className={`text-[10px] font-black uppercase tracking-widest ${scanResult.error ? 'text-red-500' : 'text-cyan-500'}`}>
+                                                    {scanResult.error ? 'Validation ERROR' : 'Validation ACK'}
+                                                </span>
+                                                {scanResult.error ? <ShieldAlert className="w-5 h-5 text-red-500" /> : <CheckCircle2 className="w-5 h-5 text-cyan-500" />}
+                                            </div>
+                                            <div>
+                                                <div className="text-xl font-black text-white uppercase truncate">{scanResult.name}</div>
+                                                {scanResult.error ? (
+                                                    <div className="text-[10px] font-bold text-red-400 mt-1 flex items-center gap-1">
+                                                        <Activity className="w-3 h-3" /> {scanResult.error}
+                                                    </div>
+                                                ) : (
+                                                    <div className="flex items-center gap-2 mt-1">
+                                                        <span className="text-[10px] font-black uppercase text-white/40">{scanResult.team}</span>
+                                                        <span className="text-[10px] font-mono text-orange-500 bg-orange-500/10 px-2 rounded">{scanResult.team_number}</span>
+                                                    </div>
+                                                )}
+                                            </div>
+                                            <div className="pt-2 border-t border-white/5 flex items-center justify-between">
+                                                <span className="text-[10px] font-bold text-white/20 uppercase">Status Code</span>
+                                                <span className={`text-[10px] font-black ${scanResult.error ? 'text-red-400' : 'text-cyan-400'}`}>{scanResult.status}</span>
+                                            </div>
+                                        </motion.div>
+                                    )}
+
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="bg-white/5 border border-white/10 p-5 rounded-3xl text-center">
+                                            <div className="text-xl font-black text-white">{data.users.filter((u: any) => u.is_present).length}</div>
+                                            <div className="text-[8px] text-white/20 uppercase font-black tracking-widest mt-1">Verified Entrants</div>
+                                        </div>
+                                        <div className="bg-white/5 border border-white/10 p-5 rounded-3xl text-center">
+                                            <div className="text-xl font-black text-white/10">{data.users.filter((u: any) => !u.is_present && u.status === 'APPROVED').length}</div>
+                                            <div className="text-[8px] text-white/20 uppercase font-black tracking-widest mt-1">Pending Entry</div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Right: Scanner Interface */}
+                                <div className="space-y-6 w-full max-w-sm">
+                                    <div className="relative aspect-square rounded-[2rem] overflow-hidden border-4 border-white/10 shadow-[0_0_50px_rgba(255,165,0,0.1)] group">
+                                        <Scanner
+                                            onScan={handleScan}
+                                            allowMultiple={true}
+                                            scanDelay={2000}
+                                            components={{ finder: true }}
+                                            styles={{ container: { width: '100%', height: '100%' } }}
+                                        />
+                                        <div className="absolute inset-0 pointer-events-none border-[40px] border-black/40 group-hover:border-black/20 transition-all" />
+                                        <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 pointer-events-none px-10">
+                                            <div className="w-full h-0.5 bg-orange-500 animate-scan-line shadow-[0_0_20px_rgba(249,115,22,1)]" />
+                                        </div>
+
+                                        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-black/60 backdrop-blur-md px-4 py-2 rounded-full border border-white/10">
+                                            <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                                            <span className="text-[9px] font-black uppercase text-white/80 tracking-tighter">Sensor Online</span>
+                                        </div>
+                                    </div>
+
+                                    <button
+                                        onClick={() => { setScanResult(null); fetchAllData(); }}
+                                        className="w-full flex items-center justify-center gap-2 px-6 py-4 bg-white/5 border border-white/10 rounded-[1.5rem] hover:bg-white/10 transition-all text-[10px] font-black uppercase tracking-widest"
+                                    >
+                                        <RotateCcw className="w-4 h-4 text-orange-500" />
+                                        Re-calibrate Sensors
+                                    </button>
+
+                                    <div className="bg-white/5 border border-white/10 p-6 rounded-3xl space-y-4">
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-[10px] font-black uppercase tracking-widest text-white/40">Recent Activity Feed</span>
+                                            <Clock className="w-4 h-4 text-white/20" />
+                                        </div>
+                                        <div className="space-y-3">
+                                            {recentScans.length === 0 ? (
+                                                <div className="text-[10px] text-white/10 text-center py-4 uppercase italic">No scans recorded yet...</div>
+                                            ) : (
+                                                recentScans.map((s) => (
+                                                    <motion.div
+                                                        key={s.id}
+                                                        initial={{ opacity: 0, x: -10 }}
+                                                        animate={{ opacity: 1, x: 0 }}
+                                                        className="flex items-center justify-between p-3 bg-white/[0.02] border border-white/5 rounded-xl"
+                                                    >
+                                                        <div>
+                                                            <div className="text-[10px] font-black text-white uppercase">{s.name}</div>
+                                                            <div className="text-[8px] text-white/20 uppercase font-bold">{s.team}</div>
+                                                        </div>
+                                                        <div className="text-[9px] font-mono text-cyan-500">{s.time}</div>
+                                                    </motion.div>
+                                                ))
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     )}
@@ -1014,8 +1327,8 @@ export default function MainDashboard() {
                                         </td>
                                         <td className="py-4 px-4">
                                             <div className="flex gap-2">
-                                                <button onClick={() => handleInlineSave(u.id, 'status', 'APPROVED')} className="px-4 py-2 bg-green-500/10 text-green-500 text-[10px] font-black rounded-lg border border-green-500/20 hover:bg-green-500 hover:text-black transition-all">APPROVE</button>
-                                                <button onClick={() => handleInlineSave(u.id, 'status', 'REJECTED')} className="px-4 py-2 bg-red-500/10 text-red-500 text-[10px] font-black rounded-lg border border-red-500/20 hover:bg-red-500 hover:text-black transition-all">REJECT</button>
+                                                <button onClick={() => handleVerifyAction(u, 'APPROVED')} className="px-4 py-2 bg-green-500/10 text-green-500 text-[10px] font-black rounded-lg border border-green-500/20 hover:bg-green-500 hover:text-black transition-all">APPROVE</button>
+                                                <button onClick={() => handleVerifyAction(u, 'REJECTED')} className="px-4 py-2 bg-red-500/10 text-red-500 text-[10px] font-black rounded-lg border border-red-500/20 hover:bg-red-500 hover:text-black transition-all">REJECT</button>
                                             </div>
                                         </td>
                                     </tr>
@@ -1054,7 +1367,7 @@ export default function MainDashboard() {
                                         if (e.target.checked) setSelectedUsers(filteredUsers.map((u: any) => u.id));
                                         else setSelectedUsers([]);
                                     }} checked={selectedUsers.length === filteredUsers.length && filteredUsers.length > 0} className="rounded border-white/20 bg-white/5" />,
-                                    'Profile', 'Contact (Edit)', 'College', 'Branch', 'Status', 'Payment Proof', 'UTR (Edit)', 'Joined At', 'Actions'
+                                    'Profile', 'Squad', 'Contact (Edit)', 'College', 'Branch', 'Status', 'Payment Proof', 'UTR (Edit)', 'Joined At', 'Actions'
                                 ]}
                                 data={filteredUsers}
                                 renderRow={(u: any) => (
@@ -1074,6 +1387,16 @@ export default function MainDashboard() {
                                             <div className="font-bold">{u.name}</div>
                                             <div className="text-[10px] text-white/40 uppercase font-mono">{u.reg_no}</div>
                                             {u.is_present && <span className="mt-1 inline-flex items-center gap-1 text-[8px] font-black bg-cyan-500 text-black px-1 rounded uppercase">In Venue</span>}
+                                        </td>
+                                        <td className="py-4 px-4 overflow-hidden">
+                                            {u.squad ? (
+                                                <div className="max-w-[120px]">
+                                                    <div className="text-[10px] font-black uppercase text-purple-400 truncate">{u.squad.name}</div>
+                                                    <div className="text-[8px] font-mono text-white/20 tracking-tighter">{u.squad.unique_code}</div>
+                                                </div>
+                                            ) : (
+                                                <span className="text-[8px] font-black text-white/10 uppercase tracking-widest border border-white/5 px-2 py-0.5 rounded">Solo</span>
+                                            )}
                                         </td>
                                         <td className="py-4 px-4 text-xs whitespace-nowrap font-mono">
                                             {editingId === u.id && editField === 'email' ? (
@@ -1177,6 +1500,9 @@ export default function MainDashboard() {
                                         <td className="py-4 px-4 text-[10px] text-white/20 whitespace-nowrap">{new Date(u.created_at).toLocaleString()}</td>
                                         <td className="py-4 px-4 text-right">
                                             <div className="flex items-center justify-end gap-2">
+                                                <button onClick={() => setEmailModal({ userId: u.id, name: u.name })} className="p-2 text-white/20 hover:text-cyan-500 hover:bg-cyan-500/10 rounded-lg transition-all" title="Send Custom Email">
+                                                    <Mail className="w-4 h-4" />
+                                                </button>
                                                 <button onClick={() => setMovingUser(u)} className="p-2 text-white/20 hover:text-orange-500 hover:bg-orange-500/10 rounded-lg transition-all" title="Move to Squad">
                                                     <Camera className="w-4 h-4" />
                                                 </button>
@@ -1210,42 +1536,64 @@ export default function MainDashboard() {
                         )}
                     />}
 
-                    {activeTab === 'QR' && <TableLayout
-                        headers={['Set Name', 'UPI ID', 'Amount', 'Usage/Limit', 'Status', 'Actions']}
-                        data={data.qr}
-                        renderRow={(q: any) => (
-                            <tr key={q.id} className="border-b border-white/5 hover:bg-white/[0.01]">
-                                <td className="py-4 px-4">
-                                    <div className="font-bold text-sm tracking-tight">{q.upi_name || 'N/A'}</div>
-                                    <div className="text-[9px] text-white/30 uppercase font-mono tracking-tighter truncate max-w-[150px]">{q.id}</div>
-                                </td>
-                                <td className="py-4 px-4 font-mono text-xs text-orange-400">{q.upi_id}</td>
-                                <td className="py-4 px-4 font-black text-cyan-400">₹{q.amount}</td>
-                                <td className="py-4 px-4">
-                                    <div className="text-xs font-bold">{q.today_usage || 0} / {q.daily_limit || 100}</div>
-                                    <div className="w-16 h-1 bg-white/5 rounded-full mt-1 overflow-hidden">
-                                        <div className="h-full bg-cyan-500" style={{ width: `${Math.min(((q.today_usage || 0) / (q.daily_limit || 100)) * 100, 100)}%` }} />
-                                    </div>
-                                </td>
-                                <td className="py-4 px-4">
-                                    <button onClick={() => toggleStatus('qr_codes', q.id, q.active)} className="transition-transform active:scale-90">
-                                        {q.active ? <ToggleRight className="text-green-500 w-6 h-6" /> : <ToggleLeft className="text-white/20 w-6 h-6" />}
-                                    </button>
-                                </td>
-                                <td className="py-4 px-4">
-                                    <button onClick={() => deleteItem('qr_codes', q.id)} className="p-2 text-white/10 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all" title="Delete">
-                                        <Trash2 className="w-4 h-4" />
-                                    </button>
-                                </td>
-                            </tr>
-                        )}
-                    />}
+                    {activeTab === 'QR' && (
+                        <div className="space-y-4">
+                            <div className="flex justify-between items-center mb-6">
+                                <h2 className="text-xl font-black tracking-tight text-white uppercase italic">QR Distribution Array</h2>
+                                <button
+                                    onClick={async () => {
+                                        if (confirm("Reset ALL daily usage counters? This should be done at the start of each day.")) {
+                                            try {
+                                                setLoading(true);
+                                                await resetQRUsage();
+                                                fetchAllData();
+                                                alert("All QR counters reset to zero.");
+                                            } catch (err: any) { alert(err.message); } finally { setLoading(false); }
+                                        }
+                                    }}
+                                    className="px-4 py-2 bg-white/5 border border-white/10 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-white/10 hover:text-orange-500 transition-all flex items-center gap-2"
+                                >
+                                    <RotateCcw className="w-4 h-4" /> Reset Daily Limits
+                                </button>
+                            </div>
+                            <TableLayout
+                                headers={['Set Name', 'UPI ID', 'Amount', 'Usage/Limit', 'Status', 'Actions']}
+                                data={data.qr}
+                                renderRow={(q: any) => (
+                                    <tr key={q.id} className="border-b border-white/5 hover:bg-white/[0.01]">
+                                        <td className="py-4 px-4">
+                                            <div className="font-bold text-sm tracking-tight">{q.upi_name || 'N/A'}</div>
+                                            <div className="text-[9px] text-white/30 uppercase font-mono tracking-tighter truncate max-w-[150px]">{q.id}</div>
+                                        </td>
+                                        <td className="py-4 px-4 font-mono text-xs text-orange-400">{q.upi_id}</td>
+                                        <td className="py-4 px-4 font-black text-cyan-400">₹{q.amount}</td>
+                                        <td className="py-4 px-4">
+                                            <div className="text-xs font-bold">{q.today_usage || 0} / {q.daily_limit || 100}</div>
+                                            <div className="w-16 h-1 bg-white/5 rounded-full mt-1 overflow-hidden">
+                                                <div className="h-full bg-cyan-500" style={{ width: `${Math.min(((q.today_usage || 0) / (q.daily_limit || 100)) * 100, 100)}%` }} />
+                                            </div>
+                                        </td>
+                                        <td className="py-4 px-4">
+                                            <button onClick={() => toggleStatus('qr_codes', q.id, q.active)} className="transition-transform active:scale-90">
+                                                {q.active ? <ToggleRight className="text-green-500 w-6 h-6" /> : <ToggleLeft className="text-white/20 w-6 h-6" />}
+                                            </button>
+                                        </td>
+                                        <td className="py-4 px-4">
+                                            <button onClick={() => deleteItem('qr_codes', q.id)} className="p-2 text-white/10 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all" title="Delete">
+                                                <Trash2 className="w-4 h-4" />
+                                            </button>
+                                        </td>
+                                    </tr>
+                                )}
+                            />
+                        </div>
+                    )}
 
                     {activeTab === 'TEAMS' && (
                         <div className="space-y-6">
                             <div className="flex justify-between items-center mb-6 px-1">
                                 <div>
-                                    <h2 className="text-xl font-black tracking-tight text-white uppercase italic">Squad Command Center</h2>
+                                    <h2 className="text-xl font-black tracking-tight text-white uppercase italic">Squad Command Center <span className="text-[10px] not-italic text-orange-500 ml-2 border border-orange-500/20 px-2 py-0.5 rounded bg-orange-500/5">v2.1-SQUAD</span></h2>
                                     <p className="text-[10px] text-white/40 font-bold uppercase tracking-widest pl-0.5">Manage Legions & Solo Warriors</p>
                                 </div>
                                 <div className="flex items-center gap-3">
@@ -1292,6 +1640,7 @@ export default function MainDashboard() {
                                             <thead className="bg-white/5">
                                                 <tr className="border-b border-white/10">
                                                     <th className="p-4 text-[10px] uppercase tracking-widest text-white/40">Team Identification</th>
+                                                    <th className="p-4 text-[10px] uppercase tracking-widest text-white/40">Team ID</th>
                                                     <th className="p-4 text-[10px] uppercase tracking-widest text-white/40">Squad Code</th>
                                                     <th className="p-4 text-[10px] uppercase tracking-widest text-white/40">Type</th>
                                                     <th className="p-4 text-[10px] uppercase tracking-widest text-white/40">Warriors</th>
@@ -1324,6 +1673,11 @@ export default function MainDashboard() {
                                                                     )}
                                                                     <div className="text-[9px] text-white/20 font-mono italic">ID: {team.id}</div>
                                                                 </div>
+                                                            </div>
+                                                        </td>
+                                                        <td className="p-4">
+                                                            <div className="font-mono text-[10px] font-black text-orange-500 bg-orange-500/10 px-2 py-1 rounded border border-orange-500/20 inline-block shadow-[0_0_10px_rgba(249,115,22,0.1)]">
+                                                                {team.team_number || '---'}
                                                             </div>
                                                         </td>
                                                         <td className="p-4">
@@ -1670,6 +2024,54 @@ export default function MainDashboard() {
                     onClose={() => setViewMember(null)}
                 />
             )}
+
+            {emailModal && (
+                <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
+                    <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-neutral-900 border border-white/10 p-8 rounded-3xl max-w-lg w-full shadow-2xl space-y-6">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <h3 className="text-xl font-black uppercase italic tracking-tighter">Custom Dispatch</h3>
+                                <p className="text-white/40 text-[10px] uppercase font-bold tracking-widest">To: {emailModal.name}</p>
+                            </div>
+                            <button onClick={() => setEmailModal(null)} className="p-2 hover:bg-white/5 rounded-lg text-white/40"><X className="w-5 h-5" /></button>
+                        </div>
+
+                        <div className="space-y-4">
+                            <div className="space-y-1">
+                                <label className="text-[10px] uppercase font-bold text-white/30 ml-1">Subject Header</label>
+                                <input
+                                    type="text"
+                                    value={emailSubject}
+                                    onChange={(e) => setEmailSubject(e.target.value)}
+                                    placeholder="Enter email subject..."
+                                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 outline-none focus:border-cyan-500/50 transition-all font-bold text-sm"
+                                />
+                            </div>
+                            <div className="space-y-1">
+                                <label className="text-[10px] uppercase font-bold text-white/30 ml-1">Transmission Content</label>
+                                <textarea
+                                    value={emailMessage}
+                                    onChange={(e) => setEmailMessage(e.target.value)}
+                                    placeholder="Write your message here..."
+                                    rows={5}
+                                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 outline-none focus:border-cyan-500/50 transition-all text-sm font-medium resize-none"
+                                />
+                            </div>
+                        </div>
+
+                        <div className="flex gap-4">
+                            <button onClick={() => setEmailModal(null)} className="flex-1 py-3 bg-white/5 rounded-xl font-bold hover:bg-white/10 transition-all text-xs uppercase">Cancel</button>
+                            <button
+                                onClick={handleSendEmail}
+                                disabled={loading || !emailSubject || !emailMessage}
+                                className="flex-1 py-3 bg-gradient-to-r from-cyan-500 to-blue-600 rounded-xl font-bold hover:opacity-90 transition-all flex items-center justify-center gap-2 text-xs uppercase"
+                            >
+                                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Mail className="w-4 h-4" /> Send Email</>}
+                            </button>
+                        </div>
+                    </motion.div>
+                </div>
+            )}
         </div>
     );
 }
@@ -1804,6 +2206,7 @@ function SquadRow({ team, members, onRecruit, onKick, onEdit, onViewMember, onDe
                         )}
                         <div className="flex items-center gap-2 mt-0.5">
                             <span className="text-[9px] text-white/30 font-mono tracking-widest uppercase">{team.unique_code}</span>
+                            <span className="text-[9px] font-mono text-orange-500 bg-orange-500/10 px-2 rounded border border-orange-500/20">{team.team_number || '---'}</span>
                             {!isVirtual && (
                                 <button onClick={() => {
                                     if (confirm("Regen code?")) onEdit('unique_code', Math.random().toString(36).substring(2, 8).toUpperCase());

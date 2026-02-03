@@ -7,7 +7,6 @@ import { createTicket } from "@/lib/supabase-actions";
 import { getUserSupportTickets } from "@/lib/support-actions";
 import { Loader2, MessageCircle, Send, CheckCircle, Clock, ArrowLeft } from "lucide-react";
 import { motion } from "framer-motion";
-import { GlassNavbar } from "@/components/glass-navbar";
 import { getFriendlyError } from "@/lib/error-handler";
 
 export default function SupportPage() {
@@ -19,6 +18,7 @@ export default function SupportPage() {
     const [description, setDescription] = useState("");
     const [error, setError] = useState<string | null>(null);
     const [success, setSuccess] = useState(false);
+    const [guestInfo, setGuestInfo] = useState({ name: "", email: "", reg_no: "" });
     const router = useRouter();
 
     useEffect(() => {
@@ -33,25 +33,23 @@ export default function SupportPage() {
         }, {} as any);
 
         const userId = cookies['student_session'];
-        if (!userId) {
-            router.push("/login");
-            return;
-        }
 
         try {
-            const { data: userData, error: uErr } = await supabase
-                .from("users")
-                .select("*")
-                .eq("id", userId)
-                .single();
+            if (userId) {
+                const { data: userData, error: uErr } = await supabase
+                    .from("users")
+                    .select("*")
+                    .eq("id", userId)
+                    .single();
 
-            if (uErr) throw uErr;
-            setUser(userData);
-
-            const ticketsData = await getUserSupportTickets(userId);
-            setTickets(ticketsData || []);
+                if (!uErr) {
+                    setUser(userData);
+                    const ticketsData = await getUserSupportTickets(userId);
+                    setTickets(ticketsData || []);
+                }
+            }
         } catch (err: any) {
-            setError(getFriendlyError(err));
+            // Silently fail auth for guest support
         } finally {
             setLoading(false);
         }
@@ -59,6 +57,12 @@ export default function SupportPage() {
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+
+        if (!user && (!guestInfo.name || !guestInfo.email)) {
+            setError("Please provide your name and email so we can reach you.");
+            return;
+        }
+
         if (!description.trim()) {
             setError("Please describe your issue");
             return;
@@ -67,9 +71,17 @@ export default function SupportPage() {
         try {
             setSubmitting(true);
             setError(null);
-            await createTicket(user.id, issueType, description);
+
+            // If logged in, use user.id, else use guest info in description
+            const finalDescription = user
+                ? description
+                : `[GUEST: ${guestInfo.name} | ${guestInfo.email} | ${guestInfo.reg_no}]\n\n${description}`;
+
+            await createTicket(user?.id || null, issueType, finalDescription);
+
             setSuccess(true);
             setDescription("");
+            setGuestInfo({ name: "", email: "", reg_no: "" });
             setTimeout(() => setSuccess(false), 3000);
             await fetchData();
         } catch (err: any) {
@@ -83,8 +95,6 @@ export default function SupportPage() {
 
     return (
         <div className="min-h-screen bg-black text-white">
-            <GlassNavbar />
-
             <div className="container mx-auto px-4 py-8 max-w-4xl">
                 <div className="mb-8">
                     <button onClick={() => router.push("/dashboard")} className="flex items-center gap-2 text-white/60 hover:text-white transition-colors mb-4">
@@ -99,10 +109,44 @@ export default function SupportPage() {
                 <div className="glass-card p-6 mb-6">
                     <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
                         <MessageCircle className="w-5 h-5 text-cyan-400" />
-                        Submit New Ticket
+                        {user ? 'Submit New Ticket' : 'Guest Support / Account Recovery'}
                     </h2>
 
                     <form onSubmit={handleSubmit} className="space-y-4">
+                        {!user && (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-bold mb-2 text-white/80">Your Name</label>
+                                    <input
+                                        type="text"
+                                        value={guestInfo.name}
+                                        onChange={(e) => setGuestInfo({ ...guestInfo, name: e.target.value })}
+                                        placeholder="Enter your full name"
+                                        className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:border-cyan-500 focus:outline-none transition-colors"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold mb-2 text-white/80">Email Address</label>
+                                    <input
+                                        type="email"
+                                        value={guestInfo.email}
+                                        onChange={(e) => setGuestInfo({ ...guestInfo, email: e.target.value })}
+                                        placeholder="Email where we can reach you"
+                                        className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:border-cyan-500 focus:outline-none transition-colors"
+                                    />
+                                </div>
+                                <div className="md:col-span-2">
+                                    <label className="block text-sm font-bold mb-2 text-white/80">Registration Number (If known)</label>
+                                    <input
+                                        type="text"
+                                        value={guestInfo.reg_no}
+                                        onChange={(e) => setGuestInfo({ ...guestInfo, reg_no: e.target.value })}
+                                        placeholder="Helps us find your account faster"
+                                        className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:border-cyan-500 focus:outline-none transition-colors"
+                                    />
+                                </div>
+                            </div>
+                        )}
                         <div>
                             <label className="block text-sm font-bold mb-2 text-white/80">Issue Type</label>
                             <select
@@ -177,8 +221,8 @@ export default function SupportPage() {
                                                     {ticket.issue_type}
                                                 </span>
                                                 <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase ${ticket.status === 'RESOLVED'
-                                                        ? 'bg-green-500/20 text-green-500'
-                                                        : 'bg-yellow-500/20 text-yellow-500'
+                                                    ? 'bg-green-500/20 text-green-500'
+                                                    : 'bg-yellow-500/20 text-yellow-500'
                                                     }`}>
                                                     {ticket.status === 'RESOLVED' ? <CheckCircle className="w-3 h-3 inline mr-1" /> : <Clock className="w-3 h-3 inline mr-1" />}
                                                     {ticket.status}

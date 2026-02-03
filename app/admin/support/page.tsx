@@ -67,8 +67,7 @@ export default function AdminSupportPage() {
             setTickets(data || []);
             setFilteredTickets(data || []);
         } catch (err: any) {
-            console.error("Error fetching tickets:", err);
-        } finally {
+            } finally {
             setLoading(false);
         }
     };

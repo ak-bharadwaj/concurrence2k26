@@ -44,17 +44,19 @@ export default function AdminScanPage() {
         setMessage(null);
 
         try {
-            // Text is expected to be User ID (UUID)
-            if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(text)) {
-                throw new Error("Invalid QR Code Format");
+            const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(text);
+
+            let query = supabase
+                .from("users")
+                .select("id, name, reg_no, status, checked_in, team_id, teams!team_id(name)");
+
+            if (isUUID) {
+                query = query.eq("id", text);
+            } else {
+                query = query.eq("reg_no", text);
             }
 
-            // Fetch User
-            const { data: user, error } = await supabase
-                .from("users")
-                .select("id, name, reg_no, status, checked_in, team_id, teams(name)")
-                .eq("id", text)
-                .single();
+            const { data: user, error } = await query.single();
 
             if (error || !user) throw new Error("User not found");
 
@@ -124,9 +126,9 @@ export default function AdminScanPage() {
                 </div>
 
                 <div className={`w-full aspect-square bg-neutral-900/50 backdrop-blur-md rounded-[2.5rem] overflow-hidden border-2 transition-all duration-300 relative shadow-2xl ${message?.type === 'success' ? 'border-green-500 shadow-[0_0_50px_rgba(34,197,94,0.3)]' :
-                        message?.type === 'error' ? 'border-red-500 shadow-[0_0_50px_rgba(239,68,68,0.3)]' :
-                            message?.type === 'warning' ? 'border-yellow-500 shadow-[0_0_50px_rgba(234,179,8,0.3)]' :
-                                'border-white/10'
+                    message?.type === 'error' ? 'border-red-500 shadow-[0_0_50px_rgba(239,68,68,0.3)]' :
+                        message?.type === 'warning' ? 'border-yellow-500 shadow-[0_0_50px_rgba(234,179,8,0.3)]' :
+                            'border-white/10'
                     }`}>
                     {!paused && (
                         <Scanner
@@ -183,8 +185,8 @@ export default function AdminScanPage() {
                                     initial={{ scale: 0.9 }}
                                     animate={{ scale: 1 }}
                                     className={`p-8 rounded-[2rem] flex flex-col items-center text-center shadow-2xl relative overflow-hidden ${message.type === 'success' ? 'bg-gradient-to-br from-green-500 to-emerald-700 text-white' :
-                                            message.type === 'warning' ? 'bg-gradient-to-br from-yellow-500 to-orange-600 text-black' :
-                                                'bg-gradient-to-br from-red-500 to-rose-700 text-white'
+                                        message.type === 'warning' ? 'bg-gradient-to-br from-yellow-500 to-orange-600 text-black' :
+                                            'bg-gradient-to-br from-red-500 to-rose-700 text-white'
                                         }`}
                                 >
                                     <div className="absolute inset-0 bg-white/10 mix-blend-overlay" />

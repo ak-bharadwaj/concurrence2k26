@@ -4,9 +4,8 @@ import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { getJoinRequests, respondToJoinRequest, removeMemberFromTeam, leaveTeam, updateTeamSettings, addMemberToTeam, updateMemberDetails, deleteTeam } from "@/lib/supabase-actions";
-import { Loader2, Users, Crown, Copy, Check, UserMinus, LogOut, Settings, ArrowLeft, UserPlus, X, Edit3, Save, Trash2, ShieldCheck } from "lucide-react";
+import { Loader2, Users, Crown, Copy, Check, UserMinus, LogOut, Settings, ArrowLeft, UserPlus, X, Edit3, Save, Trash2, ShieldCheck, Plus } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { GlassNavbar } from "@/components/glass-navbar";
 import { getFriendlyError } from "@/lib/error-handler";
 
 export default function TeamPage() {
@@ -189,6 +188,26 @@ export default function TeamPage() {
         }
     };
 
+    const handleUpdateMember = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!editingMember) return;
+        try {
+            setIsSavingMember(true);
+            await updateMemberDetails(editingMember.id, {
+                name: editingMember.name,
+                branch: editingMember.branch,
+                college: editingMember.college
+            });
+            alert("Warrior intel updated successfully!");
+            setEditingMember(null);
+            await fetchTeamData();
+        } catch (err: any) {
+            alert(getFriendlyError(err));
+        } finally {
+            setIsSavingMember(false);
+        }
+    };
+
     const handleAddMemberByRegNo = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!newMemberData.reg_no.trim() || !newMemberData.name.trim()) return;
@@ -208,9 +227,21 @@ export default function TeamPage() {
 
     const handleCreateFirstSquad = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!newName.trim()) return;
+        if (!newName.trim()) {
+            alert("Please enter a squad name");
+            return;
+        }
+
+        if (!user || !user.id) {
+            alert("User session not found. Please try logging in again.");
+            router.push("/login");
+            return;
+        }
+
         try {
             setIsAddingMember(true);
+            setError(null);
+
             const unique_code = Math.random().toString(36).substring(2, 8).toUpperCase();
 
             // 1. Create Team
@@ -226,7 +257,9 @@ export default function TeamPage() {
                 .select()
                 .single();
 
-            if (tErr) throw tErr;
+            if (tErr) {
+                throw tErr;
+            }
 
             // 2. Update User
             const { error: uErr } = await supabase
@@ -234,17 +267,23 @@ export default function TeamPage() {
                 .update({ team_id: teamData.id, role: "LEADER" })
                 .eq("id", user.id);
 
-            if (uErr) throw uErr;
+            if (uErr) {
+                throw uErr;
+            }
 
-            alert(`Squad ${newName} Initialized!`);
+            alert(`Squad "${newName}" Initialized Successfully! 🎉`);
             setIsCreatingFirstSquad(false);
+            setNewName("");
             await fetchTeamData();
         } catch (err: any) {
-            alert(getFriendlyError(err));
+            const errorMsg = getFriendlyError(err);
+            alert(`Failed to initialize squad: ${errorMsg}`);
+            setError(errorMsg);
         } finally {
             setIsAddingMember(false);
         }
     };
+
 
     if (loading || (!team && !error && !isCreatingFirstSquad)) return <div className="min-h-screen flex items-center justify-center"><Loader2 className="w-8 h-8 text-cyan-500 animate-spin" /></div>;
 
@@ -261,7 +300,6 @@ export default function TeamPage() {
 
     return (
         <div className="min-h-screen text-white pt-28 pb-20 px-4 relative bg-transparent font-sans">
-            <GlassNavbar />
             <div className="container mx-auto max-w-6xl relative z-10">
                 {/* Header */}
                 <div className="mb-8">
@@ -722,6 +760,68 @@ export default function TeamPage() {
                     </div>
                 )}
             </AnimatePresence>
+
+            {/* Initialize First Squad - For Solo Members */}
+            {isCreatingFirstSquad && (
+                <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="glass-card p-8 max-w-md mx-auto"
+                >
+                    <div className="text-center mb-6">
+                        <div className="w-16 h-16 bg-gradient-to-br from-cyan-500 to-purple-500 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-[0_0_30px_rgba(6,182,212,0.3)]">
+                            <Users className="w-8 h-8 text-white" />
+                        </div>
+                        <h2 className="text-2xl font-black uppercase mb-2">Initialize Your Squad</h2>
+                        <p className="text-white/60 text-sm">You're currently a solo warrior. Create your squad to team up!</p>
+                    </div>
+
+                    {error && (
+                        <div className="mb-4 p-4 bg-red-500/10 border border-red-500/30 rounded-xl text-red-400 text-sm">
+                            {error}
+                        </div>
+                    )}
+
+                    <form onSubmit={handleCreateFirstSquad} className="space-y-6">
+                        <div className="space-y-2">
+                            <label className="text-xs uppercase tracking-widest text-white/60 ml-1 font-bold">Squad Name</label>
+                            <input
+                                autoFocus
+                                required
+                                value={newName}
+                                onChange={(e) => setNewName(e.target.value)}
+                                placeholder="Enter your squad name..."
+                                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3.5 outline-none focus:border-cyan-500/50 focus:bg-cyan-500/5 transition-all text-white placeholder:text-white/30"
+                            />
+                            <p className="text-[10px] text-white/40 ml-1">Choose a unique name for your team</p>
+                        </div>
+
+                        <button
+                            type="submit"
+                            disabled={isAddingMember || !newName.trim()}
+                            className="w-full py-4 bg-gradient-to-r from-cyan-500 to-purple-500 text-white font-black uppercase tracking-wide rounded-xl hover:opacity-90 transition-all flex items-center justify-center gap-2 shadow-[0_0_30px_rgba(6,182,212,0.4)] disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            {isAddingMember ? (
+                                <>
+                                    <Loader2 className="w-5 h-5 animate-spin" />
+                                    Initializing...
+                                </>
+                            ) : (
+                                <>
+                                    <ShieldCheck className="w-5 h-5" />
+                                    Initialize Squad
+                                </>
+                            )}
+                        </button>
+
+                        <div className="pt-4 border-t border-white/10">
+                            <p className="text-xs text-white/40 text-center">
+                                After creating your squad, you'll become the team leader and can invite up to 4 more members.
+                            </p>
+                        </div>
+                    </form>
+                </motion.div>
+            )}
         </div>
     );
 }

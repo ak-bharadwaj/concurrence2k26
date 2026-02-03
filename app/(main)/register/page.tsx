@@ -702,7 +702,7 @@ function RegisterPageContent() {
             setLoading(true);
             const qr = await getNextAvailableQR(fixedAmount || totalAmount);
             setAssignedQR(qr);
-        } catch (e) { console.error(e); } finally { setLoading(false); }
+        } catch (e) { } finally { setLoading(false); }
     }
 }
 

@@ -8,10 +8,9 @@ import { collegeInfo, techSprintInfo, socialLinks } from "@/lib/data";
 
 const quickLinks = [
   { href: "/", label: "Home" },
-  { href: "#phases", label: "Phases" },
-  { href: "#judges", label: "Judges" },
-  { href: "#prizes", label: "Prizes" },
-  { href: "#about", label: "About" },
+  { href: "/support", label: "Support" },
+  { href: "/faq", label: "FAQ" },
+  { href: "/terms", label: "Terms" },
 ];
 
 const socialIcons = {

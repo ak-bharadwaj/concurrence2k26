@@ -13,8 +13,9 @@ export async function adminLogin(username: string, password_hash: string) {
         throw new Error("Invalid username or password");
     }
 
-    // Set session in localStorage for this hackathon project (simple but works)
+    // Set session in cookies for middleware protection
     if (typeof window !== "undefined") {
+        document.cookie = `admin_session=${admin.id}; path=/; max-age=${60 * 60 * 24 * 30}; SameSite=Lax`;
         localStorage.setItem("ts_admin", JSON.stringify(admin));
     }
 
@@ -31,6 +32,7 @@ export function getAdminSession() {
 
 export function adminLogout() {
     if (typeof window !== "undefined") {
+        document.cookie = "admin_session=; path=/; max-age=0;";
         localStorage.removeItem("ts_admin");
     }
 }

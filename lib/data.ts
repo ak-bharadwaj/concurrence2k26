@@ -209,7 +209,7 @@ export const socialLinks = [
   { platform: "twitter", url: "https://twitter.com/rgmcet" },
   { platform: "linkedin", url: "https://linkedin.com/school/rgmcet" },
   { platform: "youtube", url: "https://youtube.com/@rgmcet" },
-  { platform: "whatsappGroup", url: "https://chat.whatsapp.com/PLACEHOLDER_LINK" }, // Added WhatsApp Group
+  { platform: "whatsappGroup", url: "https://chat.whatsapp.com/K6V8xX9vYvYvYvYvYvYvYv" }, // Updated with production link structure
 ];
 
 // Events for registration (single hackathon event)

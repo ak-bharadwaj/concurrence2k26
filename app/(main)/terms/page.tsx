@@ -2,15 +2,12 @@
 
 import { useRouter } from "next/navigation";
 import { ArrowLeft, FileText, Shield, AlertCircle } from "lucide-react";
-import { GlassNavbar } from "@/components/glass-navbar";
 
 export default function TermsPage() {
     const router = useRouter();
 
     return (
         <div className="min-h-screen bg-black text-white">
-            <GlassNavbar />
-
             <div className="container mx-auto px-4 py-8 max-w-4xl">
                 <div className="mb-8">
                     <button onClick={() => router.push("/")} className="flex items-center gap-2 text-white/60 hover:text-white transition-colors mb-4">

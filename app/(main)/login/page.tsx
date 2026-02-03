@@ -32,9 +32,9 @@ export default function LoginPage() {
             if (error) throw error;
             if (!data) throw new Error("Invalid email or registration number.");
 
-            // 2. Set Session Cookie (Simple for this hackathon scale)
-            // Using a simple cookie 'student_session' with user ID
-            document.cookie = `student_session=${data.id}; path=/; max-age=86400;`; // 1 day
+            // 2. Set Session Cookie (Persistent - 30 days)
+            // Session persists until explicit logout
+            document.cookie = `student_session=${data.id}; path=/; max-age=${60 * 60 * 24 * 30};`; // 30 days
 
             // 3. Redirect
             router.push("/dashboard");
@@ -47,7 +47,6 @@ export default function LoginPage() {
 
     return (
         <div className="min-h-screen bg-transparent flex items-center justify-center p-4">
-            <GlassNavbar />
             <motion.div
                 initial={{ opacity: 0, scale: 0.95 }}
                 animate={{ opacity: 1, scale: 1 }}
