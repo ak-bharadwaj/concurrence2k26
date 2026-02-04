@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { Loader2, User, Users, CheckCircle, XCircle, Clock, LogOut, Ticket, Crown, MessageSquare, Send, ChevronRight, Copy, ShieldCheck, Plus, Sparkles, Upload } from "lucide-react";
-import { submitPayment, getNextAvailableQR } from "@/lib/supabase-actions";
+import { submitPayment, getNextAvailableQR, getUserJoinRequest, getJoinRequests, respondToJoinRequest } from "@/lib/supabase-actions";
 import { motion, AnimatePresence } from "framer-motion";
 import { getFriendlyError } from "@/lib/error-handler";
 import { submitSupportTicket, getUserSupportTickets } from "@/lib/support-actions";
@@ -19,11 +19,14 @@ export default function DashboardPage() {
     const [ticketForm, setTicketForm] = useState({ type: "PAYMENT", description: "" });
     const [submittingTicket, setSubmittingTicket] = useState(false);
     const [debounceTimer, setDebounceTimer] = useState<any>(null);
+    const [joinRequest, setJoinRequest] = useState<any>(null);
+    const [pendingRequests, setPendingRequests] = useState<any[]>([]);
 
     // Payment State
     const [showPaymentModal, setShowPaymentModal] = useState(false);
     const [assignedQR, setAssignedQR] = useState<any>(null);
-    const [paymentData, setPaymentData] = useState({ transactionId: '', screenshot: '' });
+    const [paymentData, setPaymentData] = useState({ transactionId: '' });
+    const [screenshotFile, setScreenshotFile] = useState<File | null>(null);
     const [paymentSubmitting, setPaymentSubmitting] = useState(false);
 
     const router = useRouter();
@@ -70,25 +73,33 @@ export default function DashboardPage() {
             setUser(userData);
 
             if (userData.team_id) {
-                // Parallelize Team and Members fetch for speed
+                // ... same logic as before ...
                 const [teamRes, membersRes] = await Promise.all([
                     supabase.from("teams").select("*").eq("id", userData.team_id).single(),
                     supabase.from("users").select("name, role, status").eq("team_id", userData.team_id)
                 ]);
 
                 if (teamRes.error && teamRes.error.code !== 'PGRST116') {
-                    // If team fetch fails but it's not a "not found" error, log it.
-                    // If it is "not found", we just don't set the team (user might have a stale team_id)
                     console.error("Team fetch error:", teamRes.error);
                 }
 
                 if (teamRes.data) {
                     setTeam({ ...teamRes.data, members: membersRes.data || [] });
+
+                    // 2b. If leader, fetch pending join requests
+                    if (userData.role === 'LEADER') {
+                        const reqs = await getJoinRequests(userData.team_id);
+                        setPendingRequests(reqs || []);
+                    }
                 } else {
                     setTeam(null);
                 }
+                setJoinRequest(null);
             } else {
                 setTeam(null);
+                // 3. If no team, check for pending join requests
+                const request = await getUserJoinRequest(userId);
+                setJoinRequest(request);
             }
 
             // Fetch tickets in parallel or after user data is confirmed
@@ -124,6 +135,7 @@ export default function DashboardPage() {
                 .on('postgres_changes', { event: '*', schema: 'public', table: 'users', filter: `id=eq.${userId}` }, () => debouncedFetch(true))
                 .on('postgres_changes', { event: '*', schema: 'public', table: 'teams', filter: user?.team_id ? `id=eq.${user.team_id}` : undefined }, () => debouncedFetch(true))
                 .on('postgres_changes', { event: '*', schema: 'public', table: 'users', filter: user?.team_id ? `team_id=eq.${user.team_id}` : undefined }, () => debouncedFetch(true))
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'join_requests', filter: user?.team_id ? `team_id=eq.${user.team_id}` : undefined }, () => debouncedFetch(true))
                 .on('postgres_changes', { event: '*', schema: 'public', table: 'support_tickets', filter: `user_id=eq.${userId}` }, () => debouncedFetch(true))
                 .subscribe();
 
@@ -152,19 +164,36 @@ export default function DashboardPage() {
 
     const handlePaymentSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!paymentData.transactionId || !paymentData.screenshot) {
-            alert("Please provide both Transaction ID and Screenshot Link.");
+        if (!paymentData.transactionId || !screenshotFile) {
+            alert("Please provide both Transaction ID and Screenshot File.");
             return;
         }
         try {
             setPaymentSubmitting(true);
+
+            // 1. Upload Screenshot to Supabase Storage
+            const fileExt = screenshotFile.name.split('.').pop();
+            const fileName = `${user.reg_no}_${Date.now()}.${fileExt}`;
+            const { data: upData, error: upErr } = await supabase.storage
+                .from("screenshots")
+                .upload(fileName, screenshotFile);
+
+            if (upErr) throw upErr;
+
+            const { data: { publicUrl } } = supabase.storage
+                .from("screenshots")
+                .getPublicUrl(upData.path);
+
+            // 2. Submit Payment Metadata
             await submitPayment(user.id, {
                 transaction_id: paymentData.transactionId,
-                screenshot_url: paymentData.screenshot,
+                screenshot_url: publicUrl,
                 assigned_qr_id: assignedQR?.id
             });
+
             setShowPaymentModal(false);
-            setPaymentData({ transactionId: '', screenshot: '' });
+            setPaymentData({ transactionId: '' });
+            setScreenshotFile(null);
             alert("Payment submitted successfully! Verification is now pending.");
             fetchDashboard();
         } catch (err: any) {
@@ -195,6 +224,19 @@ export default function DashboardPage() {
             alert(getFriendlyError(err));
         } finally {
             setSubmittingTicket(false);
+        }
+    };
+
+    const handleRespondToRequest = async (requestId: string, status: 'ACCEPTED' | 'REJECTED') => {
+        try {
+            setLoading(true);
+            await respondToJoinRequest(requestId, status);
+            alert(`Request ${status.toLowerCase()} successfully!`);
+            fetchDashboard(true);
+        } catch (err: any) {
+            alert(getFriendlyError(err));
+        } finally {
+            setLoading(false);
         }
     };
 
@@ -280,11 +322,12 @@ export default function DashboardPage() {
                                 <p className="text-sm font-medium text-white/50 max-w-lg leading-relaxed">
                                     {user.status === 'APPROVED' ? 'Your identity has been verified. You are authorized to enter the arena. Please keep your QR code ready.' :
                                         user.status === 'REJECTED' ? 'Your registration was flagged. Please contact support immediately for manual review.' :
-                                            user.status === 'UNPAID' ? 'Your registration is incomplete. Please complete the payment to lock your slot.' :
+                                            user.status === 'UNPAID' ?
+                                                (joinRequest ? "Awaiting captain's approval. Your payment window will activate once you're officially in the squad." : "Your registration is incomplete. Join a crew or finalize your payment to lock your slot.") :
                                                 'Our sentinels are verifying your payment details. This process typically takes 2-4 hours.'}
                                 </p>
 
-                                {user.status === 'UNPAID' && (
+                                {user.status === 'UNPAID' && user.team_id && !joinRequest && (
                                     <div className="mt-6">
                                         <button
                                             onClick={handleInitiatePayment}
@@ -384,6 +427,7 @@ export default function DashboardPage() {
                                 </div>
 
                                 {team ? (
+                                    // ... team members display ...
                                     <div className="flex-1 flex flex-col gap-6">
                                         <div className="bg-white/5 border border-white/10 rounded-3xl p-6">
                                             <p className="text-[10px] text-white/30 uppercase font-black tracking-widest mb-1">Squad Designation</p>
@@ -396,6 +440,42 @@ export default function DashboardPage() {
                                                 <p className="text-[10px] text-white/30 font-medium">Share this code to recruit</p>
                                             </div>
                                         </div>
+
+                                        {/* Pending Requests Alert for Leader */}
+                                        {user.role === 'LEADER' && pendingRequests.length > 0 && (
+                                            <div className="bg-cyan-500/10 border border-cyan-500/30 rounded-3xl p-6 animate-pulse">
+                                                <div className="flex items-center gap-3 mb-4">
+                                                    <div className="w-8 h-8 rounded-full bg-cyan-500/20 flex items-center justify-center">
+                                                        <ShieldCheck className="w-4 h-4 text-cyan-400" />
+                                                    </div>
+                                                    <h4 className="text-sm font-black uppercase tracking-widest text-cyan-400">New Recruit Signal Detected</h4>
+                                                </div>
+                                                <div className="space-y-3">
+                                                    {pendingRequests.map((req: any) => (
+                                                        <div key={req.id} className="flex items-center justify-between p-3 bg-black/40 rounded-2xl border border-white/5">
+                                                            <div>
+                                                                <p className="text-xs font-bold text-white">{req.users?.name || req.name || "Unknown Warrior"}</p>
+                                                                <p className="text-[9px] text-white/40 uppercase font-mono">{req.users?.reg_no || req.reg_no || "---"}</p>
+                                                            </div>
+                                                            <div className="flex gap-2">
+                                                                <button
+                                                                    onClick={() => handleRespondToRequest(req.id, 'ACCEPTED')}
+                                                                    className="px-3 py-1.5 bg-cyan-500 text-black text-[9px] font-black uppercase rounded-lg hover:bg-cyan-400 transition-all"
+                                                                >
+                                                                    Accept
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => handleRespondToRequest(req.id, 'REJECTED')}
+                                                                    className="px-3 py-1.5 bg-red-500/10 text-red-500 text-[9px] font-black uppercase rounded-lg hover:bg-red-500 hover:text-white border border-red-500/20 transition-all"
+                                                                >
+                                                                    Reject
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
 
                                         <div className="grid grid-cols-1 gap-3">
                                             {/* 5-Slot Grid Visualization */}
@@ -431,6 +511,19 @@ export default function DashboardPage() {
                                                     </div>
                                                 );
                                             })}
+                                        </div>
+                                    </div>
+                                ) : joinRequest ? (
+                                    <div className="flex-1 flex flex-col items-center justify-center text-center p-8 bg-cyan-500/5 border-2 border-dashed border-cyan-500/20 rounded-3xl animate-pulse">
+                                        <div className="w-20 h-20 bg-cyan-500/10 rounded-full flex items-center justify-center mb-6">
+                                            <Clock className="w-8 h-8 text-cyan-400" />
+                                        </div>
+                                        <h4 className="text-xl font-black text-white mb-2 italic">AWAITING ORDERS</h4>
+                                        <p className="text-xs text-white/50 max-w-xs leading-relaxed mb-4">
+                                            Your signal has been sent to the captain of <span className="text-cyan-400 font-bold">"{joinRequest.teams?.name}"</span>.
+                                        </p>
+                                        <div className="px-4 py-2 bg-white/5 rounded-lg border border-white/10 text-[10px] font-black uppercase tracking-widest text-cyan-400">
+                                            Request Status: Pending
                                         </div>
                                     </div>
                                 ) : (
@@ -596,22 +689,42 @@ export default function DashboardPage() {
                                         <input
                                             required
                                             value={paymentData.transactionId}
-                                            onChange={(e) => setPaymentData({ ...paymentData, transactionId: e.target.value })}
+                                            onChange={(e) => setPaymentData({ ...paymentData, transactionId: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '') })}
                                             className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 outline-none focus:border-cyan-500/50 transition-all font-mono text-sm text-white"
-                                            placeholder="Example: 403218123456"
+                                            placeholder="12-20 character UTR ID"
+                                            maxLength={20}
                                         />
                                     </div>
                                     <div className="space-y-1.5">
-                                        <label className="text-[10px] uppercase font-black text-white/30 tracking-widest pl-1">Screenshot Link (Drive/Imgur)</label>
-                                        <div className="relative">
-                                            <Upload className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-white/20" />
+                                        <label className="text-[10px] uppercase font-black text-white/30 tracking-widest pl-1">Payment Proof (Screenshot)</label>
+                                        <div className="relative group/upload">
                                             <input
+                                                type="file"
+                                                accept="image/*"
                                                 required
-                                                value={paymentData.screenshot}
-                                                onChange={(e) => setPaymentData({ ...paymentData, screenshot: e.target.value })}
-                                                className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-10 pr-4 outline-none focus:border-cyan-500/50 transition-all text-sm text-white placeholder:text-white/20"
-                                                placeholder="https://drive.google.com/..."
+                                                onChange={(e) => setScreenshotFile(e.target.files?.[0] || null)}
+                                                className="hidden"
+                                                id="screenshot-upload"
                                             />
+                                            <label
+                                                htmlFor="screenshot-upload"
+                                                className="flex flex-col items-center justify-center w-full min-h-[100px] bg-white/5 border border-dashed border-white/10 rounded-2xl hover:border-cyan-500/50 hover:bg-cyan-500/5 transition-all cursor-pointer p-4 group"
+                                            >
+                                                {screenshotFile ? (
+                                                    <div className="flex flex-col items-center gap-2">
+                                                        <CheckCircle className="w-8 h-8 text-green-500" />
+                                                        <span className="text-[10px] text-white/60 font-mono truncate max-w-[200px]">{screenshotFile.name}</span>
+                                                    </div>
+                                                ) : (
+                                                    <div className="flex flex-col items-center gap-2">
+                                                        <Upload className="w-8 h-8 text-white/20 group-hover:text-cyan-400 transition-colors" />
+                                                        <div className="text-center">
+                                                            <p className="text-[10px] text-white/40 uppercase font-black tracking-widest">Select Evidence</p>
+                                                            <p className="text-[8px] text-white/20 mt-1">JPG, PNG or WEBP (Max 5MB)</p>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </label>
                                         </div>
                                     </div>
 

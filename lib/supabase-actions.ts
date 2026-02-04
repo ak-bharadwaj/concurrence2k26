@@ -97,16 +97,10 @@ export async function joinTeam(code: string) {
         .select("*", { count: 'exact', head: true })
         .eq("team_id", team.id);
 
-    const { count: requestCount } = await supabase
-        .from("join_requests")
-        .select("*", { count: 'exact', head: true })
-        .eq("team_id", team.id)
-        .eq("status", 'PENDING');
+    const totalMembers = (memberCount || 0);
 
-    const totalOccupied = (memberCount || 0) + (requestCount || 0);
-
-    if (totalOccupied >= (team.max_members || 5)) {
-        throw new Error("Oops, looks like you're late! This squad is full now.");
+    if (totalMembers >= (team.max_members || 5)) {
+        throw new Error("Oops, looks like you're late! This squad is already at maximum capacity.");
     }
 
     return team;
@@ -153,15 +147,27 @@ export async function registerUser(userData: {
     tshirt_size?: string;
     role?: string;
 }) {
-    // 1. Check if user already exists and is locked (Approved/Pending)
+    // 1. Check for existing record by Email (our new unique anchor)
     const { data: existingUser } = await supabase
         .from("users")
-        .select("status, id")
-        .eq("reg_no", userData.reg_no)
+        .select("id, status, phone")
+        .eq("email", userData.email)
         .maybeSingle();
 
-    if (existingUser && (existingUser.status === "APPROVED" || existingUser.status === "PENDING" || existingUser.status === "VERIFYING")) {
-        throw new Error("This registration is already locked (Approved/Pending). Please contact support for changes.");
+    if (existingUser && ["APPROVED", "PENDING", "VERIFYING"].includes(existingUser.status)) {
+        throw new Error("This registration (Email) is already locked (Approved/Pending). Please contact support for changes.");
+    }
+
+    // 1b. Check if phone number is used by ANOTHER user
+    const { data: phoneConflict } = await supabase
+        .from("users")
+        .select("email")
+        .eq("phone", userData.phone)
+        .neq("email", userData.email) // Allow update for same email
+        .maybeSingle();
+
+    if (phoneConflict) {
+        throw new Error(`The mobile number ${userData.phone} is already linked to another registration. Please use a unique mobile number.`);
     }
 
     // 2. Verify team_id if provided
@@ -189,7 +195,7 @@ export async function registerUser(userData: {
 
     const { data, error } = await supabase
         .from("users")
-        .upsert(sanitizedData, { onConflict: 'reg_no' })
+        .upsert(sanitizedData, { onConflict: 'email' })
         .select()
         .single();
 
@@ -215,6 +221,24 @@ export async function submitPayment(userId: string, paymentData: {
     screenshot_url: string;
     assigned_qr_id?: string;
 }) {
+    // 0. Validate Transaction ID
+    const txId = paymentData.transaction_id?.trim();
+    if (!txId || txId.length < 12 || txId.length > 20) {
+        throw new Error("Transaction ID must be between 12 and 20 characters.");
+    }
+
+    // 0b. Check for duplicate Transaction ID
+    const { data: existingTx } = await supabase
+        .from("users")
+        .select("id")
+        .eq("transaction_id", txId)
+        .neq("id", userId)
+        .maybeSingle();
+
+    if (existingTx) {
+        throw new Error("This Transaction ID has already been submitted by another user.");
+    }
+
     // 1. Fetch user and team info to check for BULK mode
     const { data: user, error: uErr } = await supabase
         .from("users")
@@ -443,13 +467,46 @@ export async function requestJoinTeam(teamId: string, userId: string) {
     if (error) throw error;
     return true;
 }
-
+// 9. Get Join Requests for a Team
 export async function getJoinRequests(teamId: string, status: 'PENDING' | 'ACCEPTED' | 'COMPLETED' = 'PENDING') {
     const { data, error } = await supabase
         .from("join_requests")
-        .select("*, users!user_id(name, reg_no, college)")
+        .select(`
+            *,
+            users:user_id (
+                name,
+                reg_no,
+                college
+            )
+        `)
         .eq("team_id", teamId)
         .eq("status", status);
+
+    if (error) {
+        console.error("Error fetching join requests:", error);
+        throw error;
+    }
+
+    // Ensure we handle both object and array formats (though should be object)
+    // Map to a consistent format the UI expects (req.users.name etc)
+    return (data || []).map(req => {
+        const userData = Array.isArray(req.users) ? req.users[0] : req.users;
+        return {
+            ...req,
+            users: userData, // Original name
+            user: userData   // Alias for robustness
+        };
+    });
+}
+
+export async function getUserJoinRequest(userId: string) {
+    const { data, error } = await supabase
+        .from("join_requests")
+        .select("*, teams!team_id(name)")
+        .eq("user_id", userId)
+        .eq("status", 'PENDING')
+        .maybeSingle();
+
     if (error) throw error;
     return data;
 }
@@ -469,8 +526,9 @@ export async function respondToJoinRequest(requestId: string, status: 'ACCEPTED'
         const { data: team } = await supabase.from("teams").select("max_members").eq("id", request.team_id).single();
         const { count } = await supabase.from("users").select("*", { count: 'exact', head: true }).eq("team_id", request.team_id);
 
-        if (count !== null && count >= (team?.max_members || 5)) {
-            throw new Error("Cannot accept: Squad is already at maximum capacity.");
+        const currentMax = team?.max_members || 5;
+        if (count !== null && count >= currentMax) {
+            throw new Error(`Cannot accept: Squad is already at maximum capacity (${currentMax}).`);
         }
 
         // 3. Update User
@@ -480,12 +538,22 @@ export async function respondToJoinRequest(requestId: string, status: 'ACCEPTED'
             .eq("id", request.user_id);
 
         if (userErr) throw userErr;
+
+        // 4a. Auto-reject others if team is now full
+        if (count !== null && count + 1 >= currentMax) {
+            await supabase
+                .from("join_requests")
+                .update({ status: 'REJECTED' })
+                .eq("team_id", request.team_id)
+                .eq("status", 'PENDING')
+                .neq("id", requestId);
+        }
     }
 
-    // 4. Update Request Status
+    // 4b. Update Request Status
     const { error: updateErr } = await supabase
         .from("join_requests")
-        .update({ status: status === 'ACCEPTED' ? 'COMPLETED' : 'REJECTED' })
+        .update({ status: status })
         .eq("id", requestId);
 
     if (updateErr) throw updateErr;
@@ -498,8 +566,8 @@ export async function respondToJoinRequest(requestId: string, status: 'ACCEPTED'
                 "Welcome to the Squad! 🚀",
                 EMAIL_TEMPLATES.CUSTOM(
                     request.users.name,
-                    "Squad Join Request Approved!",
-                    "Great news! The team leader has accepted your request. You are now officially part of the squad. Please login to your dashboard to sync with your team and complete any pending payments."
+                    "Congratulations! You have joined the squad.",
+                    "Great news! The team leader has accepted your request. You are now officially part of the squad. Please login to your dashboard to sync with your team and complete your payment to finalize your registration."
                 )
             );
         } else if (status === 'REJECTED') {
@@ -509,7 +577,7 @@ export async function respondToJoinRequest(requestId: string, status: 'ACCEPTED'
                 EMAIL_TEMPLATES.CUSTOM(
                     request.users.name,
                     "Squad Request Declined",
-                    "The team leader has declined your request to join. Don't worry, you can still join other teams or participate independently."
+                    "Unfortunately, your request to join the squad was declined by the captain. Don't worry, you can still join other teams or participate independently."
                 )
             );
         }
@@ -520,19 +588,19 @@ export async function respondToJoinRequest(requestId: string, status: 'ACCEPTED'
 
 export async function registerBulkMembers(leaderId: string, teamId: string, members: any[]) {
     // 1. Fetch existing statuses to prevent overwriting APPROVED/PENDING users
-    const regNos = members.map(m => m.reg_no);
+    const emails = members.map(m => m.email);
     const { data: existingUsers } = await supabase
         .from("users")
-        .select("reg_no, status")
-        .in("reg_no", regNos);
+        .select("email, status")
+        .in("email", emails);
 
-    const lockedRegNos = new Set(
-        existingUsers?.filter(u => ["APPROVED", "PENDING", "VERIFYING"].includes(u.status)).map(u => u.reg_no) || []
+    const lockedEmails = new Set(
+        existingUsers?.filter(u => ["APPROVED", "PENDING", "VERIFYING"].includes(u.status)).map(u => u.email) || []
     );
 
     // 2. Filter out locked members
     const membersToInsert = members
-        .filter(m => !lockedRegNos.has(m.reg_no))
+        .filter(m => !lockedEmails.has(m.email))
         .map(m => ({
             name: m.name,
             reg_no: m.reg_no,
@@ -550,7 +618,7 @@ export async function registerBulkMembers(leaderId: string, teamId: string, memb
 
     const { data, error } = await supabase
         .from("users")
-        .upsert(membersToInsert, { onConflict: 'reg_no' })
+        .upsert(membersToInsert, { onConflict: 'email' })
         .select();
 
     if (error) throw error;
@@ -672,7 +740,7 @@ export async function addMemberToTeam(memberData: {
     const { data: existingUser } = await supabase
         .from("users")
         .select("*")
-        .eq("reg_no", reg_no.trim().toUpperCase())
+        .eq("email", email.trim().toLowerCase())
         .maybeSingle();
 
     if (existingUser && existingUser.team_id) {
@@ -708,7 +776,15 @@ export async function addMemberToTeam(memberData: {
             .eq("id", existingUser.id);
         if (uErr) throw uErr;
 
-        // Cleanup any ghost join requests
+        // Auto-reject other pending requests for THIS USER if they just joined (they found a home)
+        await supabase.from("join_requests").update({ status: 'COMPLETED' }).eq("user_id", existingUser.id).neq("team_id", teamId);
+
+        // Auto-reject other pending requests for THIS TEAM if it's now full
+        if (finalCount !== null && finalCount + 1 >= (team?.max_members || 5)) {
+            await supabase.from("join_requests").update({ status: 'REJECTED' }).eq("team_id", teamId).eq("status", 'PENDING');
+        }
+
+        // Cleanup any ghost join requests for this team
         await supabase.from("join_requests").delete().eq("user_id", existingUser.id).eq("team_id", teamId);
 
         return existingUser;

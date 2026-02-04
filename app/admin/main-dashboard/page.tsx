@@ -508,7 +508,7 @@ export default function MainDashboard() {
                             college: row.college,
                             transaction_id: row.transaction_id || row.utr,
                             status: row.status || "PENDING"
-                        }, { onConflict: 'reg_no' });
+                        }, { onConflict: 'email' });
 
                 }
                 alert("Import completed. Some rows might have failed if they were invalid.");

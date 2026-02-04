@@ -3,8 +3,8 @@
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { getJoinRequests, respondToJoinRequest, removeMemberFromTeam, leaveTeam, updateTeamSettings, addMemberToTeam, updateMemberDetails, deleteTeam, submitPayment, getNextAvailableQR } from "@/lib/supabase-actions";
-import { Loader2, Users, Crown, Copy, Check, UserMinus, LogOut, Settings, ArrowLeft, UserPlus, X, Edit3, Save, Trash2, ShieldCheck, Plus, CreditCard, Upload, Clock } from "lucide-react";
+import { getJoinRequests, respondToJoinRequest, removeMemberFromTeam, leaveTeam, updateTeamSettings, addMemberToTeam, updateMemberDetails, deleteTeam, submitPayment, getNextAvailableQR, joinTeam, requestJoinTeam } from "@/lib/supabase-actions";
+import { Loader2, Users, Crown, Copy, Check, UserMinus, LogOut, Settings, ArrowLeft, UserPlus, X, Edit3, Save, Trash2, ShieldCheck, Plus, CreditCard, Upload, Clock, Search } from "lucide-react";
 import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
 import { getFriendlyError } from "@/lib/error-handler";
@@ -101,7 +101,7 @@ export default function TeamPage() {
         if (debounceTimer) clearTimeout(debounceTimer);
         const timeout = setTimeout(() => {
             fetchTeamData(silent);
-        }, 1000);
+        }, 200);
         setDebounceTimer(timeout);
     }, [debounceTimer, fetchTeamData]);
 
@@ -274,14 +274,15 @@ export default function TeamPage() {
 
             const unique_code = Math.random().toString(36).substring(2, 8).toUpperCase();
 
-            // 1. Create Team
+            // 1. Create Team (RGM Units limited to 4 members to allow 5th by Admin)
+            const isRgm = user.college?.toUpperCase().includes("RGM") || user.college?.toUpperCase().includes("OTHERS") === false;
             const { data: teamData, error: tErr } = await supabase
                 .from("teams")
                 .insert([{
                     name: newName,
                     unique_code,
                     payment_mode: "INDIVIDUAL",
-                    max_members: 5,
+                    max_members: isRgm ? 4 : 5,
                     leader_id: user.id
                 }])
                 .select()
@@ -328,14 +329,14 @@ export default function TeamPage() {
             const fileExt = paymentProof.screenshot.name.split('.').pop();
             const fileName = `${user.id}_${Date.now()}.${fileExt}`;
             const { data: uploadData, error: uploadErr } = await supabase.storage
-                .from('payment-proofs')
+                .from('screenshots')
                 .upload(fileName, paymentProof.screenshot);
 
             if (uploadErr) throw uploadErr;
 
             const { data: { publicUrl } } = supabase.storage
-                .from('payment-proofs')
-                .getPublicUrl(fileName);
+                .from('screenshots')
+                .getPublicUrl(uploadData?.path || fileName);
 
             // 2. Submit payment action
             await submitPayment(user.id, {
@@ -496,16 +497,22 @@ export default function TeamPage() {
                                 Add Squad Member
                             </h3>
                             <p className="text-xs text-white/40 mb-4 uppercase font-bold tracking-widest">Enroll participants directly into your squad</p>
-                            <button
-                                onClick={() => {
-                                    setNewMemberData({ ...newMemberData, college: team?.leader?.college || "" });
-                                    setShowAddMemberModal(true);
-                                }}
-                                disabled={members.length >= (team?.max_members || 5)}
-                                className="w-full py-4 bg-cyan-500 text-black font-black rounded-xl text-[10px] uppercase hover:bg-cyan-400 transition-all disabled:opacity-20 flex items-center justify-center gap-2 whitespace-nowrap"
-                            >
-                                <UserPlus className="w-4 h-4" /> Enroll New Member
-                            </button>
+                            {members.length < (team?.max_members || 5) ? (
+                                <button
+                                    onClick={() => {
+                                        setNewMemberData({ ...newMemberData, college: team?.leader?.college || "" });
+                                        setShowAddMemberModal(true);
+                                    }}
+                                    className="w-full py-4 bg-cyan-500 text-black font-black rounded-xl text-[10px] uppercase hover:bg-cyan-400 transition-all flex items-center justify-center gap-2 whitespace-nowrap"
+                                >
+                                    <UserPlus className="w-4 h-4" /> Enroll New Member
+                                </button>
+                            ) : (
+                                <div className="w-full py-4 bg-white/5 border border-dashed border-white/10 rounded-xl flex items-center justify-center gap-2 grayscale">
+                                    <ShieldCheck className="w-4 h-4 text-white/20" />
+                                    <span className="text-[10px] text-white/20 uppercase font-black tracking-widest">Squad Capacity Reached</span>
+                                </div>
+                            )}
                             {members.length >= team.max_members && (
                                 <p className="text-[10px] text-red-500 font-bold uppercase text-center mt-3">Your squad has reached its limit</p>
                             )}
@@ -522,8 +529,8 @@ export default function TeamPage() {
                                 {joinRequests.map((req: any) => (
                                     <div key={req.id} className="flex items-center justify-between p-4 bg-white/5 rounded-xl border border-white/10">
                                         <div>
-                                            <p className="font-bold text-sm">{req.users.name}</p>
-                                            <p className="text-[10px] text-white/40 uppercase font-mono">{req.users.reg_no}</p>
+                                            <p className="font-bold text-sm">{req.users?.name || "Unknown Warrior"}</p>
+                                            <p className="text-[10px] text-white/40 uppercase font-mono">{req.users?.reg_no || "---"}</p>
                                         </div>
                                         <div className="flex gap-2">
                                             <button
@@ -547,7 +554,7 @@ export default function TeamPage() {
                                 {acceptedRequests.map((req: any) => (
                                     <div key={req.id} className="flex items-center justify-between p-4 bg-green-500/5 rounded-xl border border-green-500/20">
                                         <div>
-                                            <p className="font-bold text-sm text-green-400">{req.users.name}</p>
+                                            <p className="font-bold text-sm text-green-400">{req.users?.name || "Accepted Warrior"}</p>
                                             <p className="text-[9px] text-green-500/40 uppercase font-bold tracking-tighter italic">Accepted - Awaiting Payment</p>
                                         </div>
                                         <Clock className="w-4 h-4 text-green-500/40 animate-pulse" />
@@ -702,26 +709,68 @@ export default function TeamPage() {
 
                 {/* Actions */}
                 {isCreatingFirstSquad ? (
-                    <div className="glass-card p-12 text-center max-w-2xl mx-auto border-cyan-500/30">
-                        <Users className="w-16 h-16 text-cyan-500 mx-auto mb-6" />
-                        <h2 className="text-3xl font-black uppercase italic mb-2 tracking-tighter">Initialize Your Unit</h2>
-                        <p className="text-white/40 text-sm mb-8">You are currently operating as a lone warrior. Deploy a squad designation to recruit allies and unlock deeper potential.</p>
+                    <div className="space-y-6 max-w-2xl mx-auto">
+                        <div className="glass-card p-12 text-center border-cyan-500/30">
+                            <Plus className="w-16 h-16 text-cyan-500 mx-auto mb-6" />
+                            <h2 className="text-3xl font-black uppercase italic mb-2 tracking-tighter">Initialize Your Unit</h2>
+                            <p className="text-white/40 text-sm mb-8">You are currently operating as a lone warrior. Deploy a squad designation to recruit allies and unlock deeper potential.</p>
+                            <form onSubmit={handleCreateFirstSquad} className="space-y-4 max-w-sm mx-auto">
+                                <input
+                                    required
+                                    value={newName}
+                                    onChange={(e) => setNewName(e.target.value)}
+                                    placeholder="ENTER SQUAD DESIGNATION..."
+                                    className="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 text-center font-black uppercase tracking-widest outline-none focus:border-cyan-500 focus:bg-white/10 transition-all mb-4"
+                                />
+                                <button
+                                    disabled={isAddingMember}
+                                    className="w-full py-4 bg-cyan-500 text-black font-black rounded-2xl text-[10px] uppercase hover:bg-cyan-400 transition-all flex items-center justify-center gap-2 group"
+                                >
+                                    {isAddingMember ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Plus className="w-4 h-4 group-hover:rotate-90 transition-transform" /> Confirm Deployment</>}
+                                </button>
+                            </form>
+                        </div>
 
-                        <form onSubmit={handleCreateFirstSquad} className="space-y-4 max-w-sm mx-auto">
-                            <input
-                                required
-                                value={newName}
-                                onChange={(e) => setNewName(e.target.value)}
-                                placeholder="ENTER SQUAD DESIGNATION..."
-                                className="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 text-center font-black uppercase tracking-widest outline-none focus:border-cyan-500 focus:bg-white/10 transition-all mb-4"
-                            />
-                            <button
-                                disabled={isAddingMember}
-                                className="w-full py-4 bg-cyan-500 text-black font-black rounded-2xl text-[10px] uppercase hover:bg-cyan-400 transition-all flex items-center justify-center gap-2 group"
-                            >
-                                {isAddingMember ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Plus className="w-4 h-4 group-hover:rotate-90 transition-transform" /> Confirm Deployment</>}
-                            </button>
-                        </form>
+                        <div className="text-center font-black text-white/20 uppercase tracking-[0.5em] text-xs">OR</div>
+
+                        <div className="glass-card p-10 text-center border-purple-500/30">
+                            <Users className="w-12 h-12 text-purple-400 mx-auto mb-4" />
+                            <h3 className="text-xl font-black uppercase italic mb-2 tracking-tighter text-purple-400">Join Existing Squad</h3>
+                            <p className="text-white/40 text-xs mb-8">Sync with an established unit via their unique 6-digit squad code.</p>
+
+                            <div className="max-w-sm mx-auto">
+                                <div className="flex gap-2">
+                                    <input
+                                        value={newMemberRegNo} // Reusing this state for the search code
+                                        onChange={e => setNewMemberRegNo(e.target.value.toUpperCase())}
+                                        className="flex-1 bg-white/5 border border-white/10 rounded-2xl px-4 py-3 outline-none focus:border-purple-500 text-center font-mono tracking-widest text-xl h-14"
+                                        maxLength={6}
+                                        placeholder="XYZ123"
+                                    />
+                                    <button
+                                        onClick={async () => {
+                                            if (!newMemberRegNo) return;
+                                            try {
+                                                setLoading(true);
+                                                const teamResult = await joinTeam(newMemberRegNo);
+                                                if (confirm(`Squad "${teamResult.name}" found. Send join request?`)) {
+                                                    await requestJoinTeam(teamResult.id, user.id);
+                                                    alert("Signal sent to Captain! Await approval on your dashboard.");
+                                                    router.push("/dashboard");
+                                                }
+                                            } catch (err: any) {
+                                                alert(getFriendlyError(err));
+                                            } finally {
+                                                setLoading(false);
+                                            }
+                                        }}
+                                        className="w-14 h-14 bg-purple-500 rounded-2xl flex items-center justify-center font-bold text-black border border-white/10"
+                                    >
+                                        <Search className="w-6 h-6" />
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 ) : isLeader ? (
                     <div className="glass-card p-6 border-red-500/20 bg-red-500/5 mt-8">
@@ -1088,8 +1137,9 @@ export default function TeamPage() {
                                             <CreditCard className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-white/20" />
                                             <input
                                                 value={paymentProof.transaction_id}
-                                                onChange={(e) => setPaymentProof({ ...paymentProof, transaction_id: e.target.value })}
-                                                placeholder="ENTER 12-DIGIT UTR..."
+                                                onChange={(e) => setPaymentProof({ ...paymentProof, transaction_id: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '') })}
+                                                placeholder="12-20 CHARACTER UTR..."
+                                                maxLength={20}
                                                 className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-12 pr-4 outline-none focus:border-green-500/50 transition-all font-mono tracking-widest"
                                             />
                                         </div>

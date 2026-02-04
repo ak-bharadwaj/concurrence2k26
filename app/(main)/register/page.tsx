@@ -304,7 +304,14 @@ function RegisterPageContent() {
 
     const handleAddMember = () => {
         if (!newMember.name || !newMember.reg_no) return;
-        if (additionalMembers.length >= 4) return alert("Max 5 members allowed");
+
+        const currentTotal = (teamDetails?.members?.length || 1) + additionalMembers.length;
+        const maxLimit = teamDetails?.max_members || 5;
+
+        if (currentTotal >= maxLimit) {
+            return alert(`Maximum capacity reached (${maxLimit} warriors).`);
+        }
+
         const addedMember = {
             ...newMember,
             tshirt_size: newMember.tshirtSize
@@ -798,8 +805,9 @@ function RegisterPageContent() {
                                     label="Transaction ID (UTR) *"
                                     icon={Hash}
                                     value={paymentProof.transaction_id}
-                                    onChange={(v: string) => setPaymentProof({ ...paymentProof, transaction_id: v })}
-                                    placeholder="12 digit number"
+                                    onChange={(v: string) => setPaymentProof({ ...paymentProof, transaction_id: v.toUpperCase().replace(/[^A-Z0-9]/g, '') })}
+                                    placeholder="12-20 character UTR"
+                                    maxLength={20}
                                 />
                                 <div className="space-y-2">
                                     <label className="text-[10px] uppercase font-black text-white/30 tracking-widest pl-1">Proof of Payment *</label>
@@ -958,13 +966,13 @@ function MemberRow({ name, role, status, color, onRemove }: any) {
     );
 }
 
-function FormInput({ label, icon: Icon, value, onChange, placeholder, type = "text" }: any) {
+function FormInput({ label, icon: Icon, value, onChange, placeholder, type = "text", maxLength }: any) {
     return (
         <div className="space-y-1.5">
             <label className="text-[9px] uppercase font-black text-white/30 tracking-widest pl-1">{label}</label>
             <div className="relative group">
                 <Icon className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-white/20 group-focus-within:text-cyan-400 transition-colors" />
-                <input type={type} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} className="w-full bg-white/5 border border-white/10 rounded-2xl py-3.5 pl-11 pr-4 outline-none focus:border-cyan-500/50 transition-all font-medium text-white placeholder:text-white/10 text-xs sm:text-sm" />
+                <input type={type} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} maxLength={maxLength} className="w-full bg-white/5 border border-white/10 rounded-2xl py-3.5 pl-11 pr-4 outline-none focus:border-cyan-500/50 transition-all font-medium text-white placeholder:text-white/10 text-xs sm:text-sm" />
             </div>
         </div>
     );

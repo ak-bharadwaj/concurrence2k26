@@ -62,8 +62,10 @@ function translateCode(code: string, rawMessage: string = ""): string {
         case "23505":
             if (message.includes("reg_no")) return "This Registration Number is already registered.";
             if (message.includes("email")) return "This Email address is already in use.";
+            if (message.includes("phone")) return "This Mobile Number is already in use.";
+            if (message.includes("teams_name_key") || message.includes("teams.name")) return "This Squad Name is already taken. Choose another.";
             if (message.includes("transaction_id")) return "This Transaction ID has already been submitted by another user.";
-            return "This warrior is already in our records. Please use a different Registration No.";
+            return "Duplicate Record: One of your details (Email/Phone/Name) is already in use.";
         case "23503":
             return "Data Link Error: The related record was not found in our database.";
         case "42501":

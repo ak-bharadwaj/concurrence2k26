@@ -149,6 +149,7 @@ ALTER TABLE public.email_accounts DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.group_links DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.action_logs DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.support_tickets DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.join_requests DISABLE ROW LEVEL SECURITY;
 
 GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated, service_role;
 
