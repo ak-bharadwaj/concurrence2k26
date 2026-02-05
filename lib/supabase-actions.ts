@@ -17,19 +17,26 @@ export async function getNextAvailableQR(amount: number = 800) {
         if (error) throw error;
         if (!qr) return null;
 
-        // FIRE AND FORGET: Update usage count without awaiting
-        // This speeds up the response time significantly for the user
-        supabase
+        // Reverting to blocking await to prevent serverless execution freeze issues
+        const { error: updateError } = await supabase
             .from("qr_codes")
             .update({ use_count: qr.use_count + 1 })
-            .eq("id", qr.id)
-            .then(({ error }) => {
-                if (error) console.error("Background QR update failed:", error);
-            });
+            .eq("id", qr.id);
+
+        if (updateError) {
+            console.error("QR Update Error:", updateError);
+            // Log to file for debugging
+            const fs = require('fs');
+            fs.appendFileSync('server_qr_log.txt', `MS: Update Error: ${JSON.stringify(updateError)}\n`);
+        }
 
         return qr;
     } catch (err: any) {
         console.error("Error fetching QR:", err);
+        try {
+            const fs = require('fs');
+            fs.appendFileSync('server_qr_log.txt', `MS: Fetch Error: ${JSON.stringify(err)}\n`);
+        } catch (e) { }
         return null;
     }
 }

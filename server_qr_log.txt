@@ -1,0 +1,2 @@
+MS: Fetch Error: {"code":"42703","details":null,"hint":null,"message":"column qr_codes.use_count does not exist"}
+MS: Fetch Error: {"code":"42703","details":null,"hint":null,"message":"column qr_codes.use_count does not exist"}

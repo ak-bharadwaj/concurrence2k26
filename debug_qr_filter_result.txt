@@ -1,0 +1,14 @@
+Testing .eq('active', true) filter...
+SUCCESS! Found matched QR: db657c3c-4755-494b-86d4-49b2fd957810
+{
+  "id": "db657c3c-4755-494b-86d4-49b2fd957810",
+  "qr_image_url": "https://fqksvcwccfuevmbrlegi.supabase.co/storage/v1/object/public/screenshots/qr_1770264676220_bga5n.jpeg",
+  "upi_id": "paytm.s1cz6xx@pty",
+  "upi_name": "ramesh",
+  "category": "MAIN",
+  "amount": 800,
+  "daily_limit": 100,
+  "today_usage": 0,
+  "active": true,
+  "created_at": "2026-02-05T04:11:20.951221+00:00"
+}

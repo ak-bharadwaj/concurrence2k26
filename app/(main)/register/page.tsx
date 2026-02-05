@@ -460,11 +460,11 @@ function RegisterPageContent() {
                 };
 
                 const { data: newUser, error: regErr } = await registerUser(userParams);
-                if (regErr) throw new Error(regErr.message || "Registration failed");
+                if (regErr) throw new Error(typeof regErr === 'string' ? regErr : (regErr as any).message || "Registration failed");
                 if (!newUser) throw new Error("Registration failed.");
 
                 finalUserId = newUser.id;
-                createdUserId = newUser.id; // Track for rollback
+                createdUserId = newUser.id;
             }
 
             // LAZY REGISTRATION FOR SQUAD (FORM)
@@ -482,14 +482,14 @@ function RegisterPageContent() {
                 };
 
                 const { data: user, error: regErr } = await registerUser(userParams);
-                if (regErr || !user) throw new Error(regErr?.message || "Leader registration failed");
+                if (regErr || !user) throw new Error(typeof regErr === 'string' ? regErr : (regErr as any)?.message || "Leader registration failed");
                 finalUserId = user.id;
                 createdUserId = user.id; // Track for rollback
 
                 // 2. Create Team
                 const isRgm = userParams.college.toUpperCase().includes("RGM");
                 const { data: team, error: teamErr } = await createTeam(teamName, user.id, "BULK", isRgm ? 4 : 5);
-                if (teamErr) throw new Error(teamErr);
+                if (teamErr) throw new Error(typeof teamErr === 'string' ? teamErr : (teamErr as any).message || JSON.stringify(teamErr));
                 createdTeamId = team.id; // Track for rollback
 
                 // 3. Update Leader with Team ID and Role
@@ -517,7 +517,7 @@ function RegisterPageContent() {
                 };
 
                 const { data: newUser, error: regErr } = await registerUser(userParams);
-                if (regErr) throw new Error(regErr.message || "Registration failed");
+                if (regErr) throw new Error(typeof regErr === 'string' ? regErr : (regErr as any).message || "Registration failed");
                 if (!newUser) throw new Error("Registration failed.");
 
                 finalUserId = newUser.id;
@@ -548,7 +548,7 @@ function RegisterPageContent() {
             setStep(7); // Move to Success Acknowledgment
 
         } catch (err: any) {
-            console.error("Registration/Payment Error:", err);
+            console.error("Registration/Payment Error:", JSON.stringify(err, null, 2));
             setError(getFriendlyError(err));
 
             // ROLLBACK / COMPENSATION TRANSACTION
