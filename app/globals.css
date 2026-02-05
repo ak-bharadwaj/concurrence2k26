@@ -217,4 +217,71 @@
 
 .animate-scroll-slow {
   animation: scroll 45s linear infinite;
+}/* Mobile Performance Enhancements - Add to end of globals.css */
+
+/* GPU Acceleration for all animated elements */
+[class*="motion"],
+[class*="animate"],
+.floating-lines-container,
+[data-motion] {
+  transform: translateZ(0);
+  will-change: transform;
+  backface-visibility: hidden;
+}
+
+/* Optimize body for mobile */
+body {
+  /* Prevent overscroll bounce on iOS */
+  overscroll-behavior-y: none;
+  /* Enable smooth scrolling with GPU */
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Optimize images for mobile */
+img, video {
+  /* Prevent layout shift */
+  content-visibility: auto;
+  /* GPU decode */
+  image-rendering: -webkit-optimize-contrast;
+}
+
+/* Mobile-specific optimizations */
+@media (max-width: 768px) {
+  /* Reduce blur intensity on mobile for better performance */
+  .backdrop-blur-xl {
+    backdrop-filter: blur(8px) !important;
+  }
+  
+  .backdrop-blur-lg {
+    backdrop-filter: blur(6px) !important;
+  }
+  
+  .backdrop-blur-md {
+    backdrop-filter: blur(4px) !important;
+  }
+  
+  /* Faster animations on mobile */
+  * {
+    animation-duration: 0.3s !important;
+    transition-duration: 0.2s !important;
+  }
+  
+  /* Disable expensive shadows on mobile */
+  [class*="shadow-2xl"],
+  [class*="shadow-xl"] {
+    box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1) !important;
+  }
+}
+
+/* Prevent tap highlight on mobile */
+* {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+}
+
+/* Optimize font rendering */
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Scene,
   OrthographicCamera,
@@ -276,11 +276,24 @@ export default function FloatingLines({
   const targetParallaxRef = useRef<Vector2>(new Vector2(0, 0));
   const currentParallaxRef = useRef<Vector2>(new Vector2(0, 0));
 
+  // Visibility state for performance optimization
+  const [isVisible, setIsVisible] = useState(true);
+
+  // Mobile detection for performance
+  const [isMobileDevice] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+  });
+
+  // Reduce complexity on mobile
+  const mobileLineCount = isMobileDevice ? (typeof lineCount === 'number' ? Math.min(lineCount, 3) : [3]) : lineCount;
+  const mobileInteractive = isMobileDevice ? false : interactive;
+
   const getLineCount = (waveType: 'top' | 'middle' | 'bottom'): number => {
-    if (typeof lineCount === 'number') return lineCount;
+    if (typeof mobileLineCount === 'number') return mobileLineCount;
     if (!enabledWaves.includes(waveType)) return 0;
     const index = enabledWaves.indexOf(waveType);
-    return lineCount[index] ?? 6;
+    return mobileLineCount[index] ?? (isMobileDevice ? 3 : 6);
   };
 
   const getLineDistance = (waveType: 'top' | 'middle' | 'bottom'): number => {
@@ -301,13 +314,40 @@ export default function FloatingLines({
   useEffect(() => {
     if (!containerRef.current) return;
 
+    // Intersection Observer for visibility detection
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          setIsVisible(entry.isIntersecting);
+        });
+      },
+      { threshold: 0.1 } // Trigger when 10% visible
+    );
+
+    observer.observe(containerRef.current);
+
+    return () => {
+      if (containerRef.current) {
+        observer.unobserve(containerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+
     const scene = new Scene();
 
     const camera = new OrthographicCamera(-1, 1, 1, -1, 0, 1);
     camera.position.z = 1;
 
     const renderer = new WebGLRenderer({ antialias: false, alpha: false, powerPreference: "high-performance" });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+
+    // Mobile optimization: lower pixel ratio for better performance
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    const pixelRatio = isMobile ? 1 : Math.min(window.devicePixelRatio || 1, 1.5);
+    renderer.setPixelRatio(pixelRatio);
+
     renderer.domElement.style.width = '100%';
     renderer.domElement.style.height = '100%';
     containerRef.current.appendChild(renderer.domElement);
@@ -348,7 +388,7 @@ export default function FloatingLines({
       },
 
       iMouse: { value: new Vector2(-1000, -1000) },
-      interactive: { value: interactive },
+      interactive: { value: mobileInteractive },
       bendRadius: { value: bendRadius },
       bendStrength: { value: bendStrength },
       bendInfluence: { value: 0 },
@@ -428,20 +468,22 @@ export default function FloatingLines({
       targetInfluenceRef.current = 0.0;
     };
 
-    if (interactive) {
+    if (mobileInteractive) {
       renderer.domElement.addEventListener('pointermove', handlePointerMove);
       renderer.domElement.addEventListener('pointerleave', handlePointerLeave);
     }
 
     let raf = 0;
     const renderLoop = () => {
-      if (document.hidden) {
+      // Pause rendering if not visible or tab is hidden
+      if (!isVisible || document.hidden) {
         raf = requestAnimationFrame(renderLoop);
         return;
       }
+
       uniforms.iTime.value = clock.getElapsedTime();
 
-      if (interactive) {
+      if (mobileInteractive) {
         currentMouseRef.current.lerp(targetMouseRef.current, mouseDamping);
         uniforms.iMouse.value.copy(currentMouseRef.current);
 
@@ -476,7 +518,7 @@ export default function FloatingLines({
         ro.disconnect();
       }
 
-      if (interactive) {
+      if (mobileInteractive) {
         renderer.domElement.removeEventListener('pointermove', handlePointerMove);
         renderer.domElement.removeEventListener('pointerleave', handlePointerLeave);
       }
@@ -489,6 +531,7 @@ export default function FloatingLines({
       }
     };
   }, [
+    isVisible,
     linesGradient,
     enabledWaves,
     lineCount,
@@ -510,7 +553,8 @@ export default function FloatingLines({
       ref={containerRef}
       className="w-full h-full relative overflow-hidden floating-lines-container"
       style={{
-        mixBlendMode: mixBlendMode
+        mixBlendMode: mixBlendMode,
+        willChange: 'transform', // GPU acceleration hint
       }}
     />
   );

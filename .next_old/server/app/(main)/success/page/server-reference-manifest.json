@@ -1,0 +1,20 @@
+{
+  "node": {
+    "40288d1ad6141dfc9771ea191f5888f1db2d55a3d3": {
+      "workers": {
+        "app/(main)/success/page": {
+          "moduleId": 77204,
+          "async": false,
+          "exportedName": "getActiveGroupLink",
+          "filename": "lib/supabase-actions.ts"
+        }
+      },
+      "layer": {
+        "app/(main)/success/page": "action-browser"
+      },
+      "exportedName": "getActiveGroupLink",
+      "filename": "lib/supabase-actions.ts"
+    }
+  },
+  "edge": {}
+}

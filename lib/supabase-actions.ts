@@ -239,6 +239,37 @@ export async function registerUser(userData: {
     }
 }
 
+export async function checkUserAvailability(email: string, phone: string) {
+    try {
+        // 1. Check existing via Email
+        const { data: existingUser } = await supabase
+            .from("users")
+            .select("status")
+            .eq("email", email)
+            .maybeSingle();
+
+        if (existingUser && ["APPROVED", "PENDING", "VERIFYING"].includes(existingUser.status)) {
+            return { error: "This email is already registered and locked. Please contact support." };
+        }
+
+        // 2. Check existing via Phone
+        const { data: phoneUser } = await supabase
+            .from("users")
+            .select("status")
+            .eq("phone", phone)
+            .neq("email", email)
+            .maybeSingle();
+
+        if (phoneUser) {
+            return { error: "This phone number is already linked to another registration." };
+        }
+
+        return { success: true };
+    } catch (err: any) {
+        return { error: err.message || "Availability check failed." };
+    }
+}
+
 // 2. Submit Payment Details
 export async function submitPayment(userId: string, paymentData: {
     transaction_id: string;

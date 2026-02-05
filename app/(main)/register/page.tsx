@@ -41,8 +41,10 @@ import {
     requestJoinTeam,
     getJoinRequests,
     respondToJoinRequest,
-    registerBulkMembers
+    registerBulkMembers,
+    checkUserAvailability
 } from "@/lib/supabase-actions";
+
 import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import { getFriendlyError } from "@/lib/error-handler";
@@ -251,48 +253,55 @@ function RegisterPageContent() {
                 role: (regMode === "SQUAD" && squadSubMode === "FORM") ? "LEADER" : "MEMBER"
             };
 
-            const { data: user, error: regErr } = await registerUser(userParams);
-
-            if (regErr) {
-                setError(getFriendlyError(regErr));
-                return;
-            }
-
-            if (!user) {
-                setError("System failed to finalize identity synchronization. Please try again.");
-                return;
-            }
-
-            setUserId(user.id);
-            setUserRole(user.role);
-
-            // POST-REGISTRATION LOGIC
-            if (regMode === "SOLO") {
-                setStep(2); // Move to Solo Protocol (Consent)
-            } else if (regMode === "SQUAD") {
+            if (regMode === "SQUAD") {
+                // Logic split inside submodes now
+                // --- SQUAD POST-REGISTRATION LOGIC ---
                 if (squadSubMode === "FORM") {
-                    // Create Team and Link (RGM Units limited to 4 members to allow 5th by Admin)
-                    const isRgm = userParams.college.toUpperCase().includes("RGM");
-                    const { data: team, error: teamErr } = await createTeam(teamName, user.id, "BULK", isRgm ? 4 : 5);
-
-                    if (teamErr) {
-                        setError(getFriendlyError(teamErr));
+                    // DEFERRED SQUAD CREATION:
+                    // Validate availability first
+                    const { error: availErr } = await checkUserAvailability(userParams.email, userParams.phone);
+                    if (availErr) {
+                        setError(getFriendlyError(availErr));
                         return;
                     }
 
-                    await supabase.from("users").update({ team_id: team.id, role: "LEADER" }).eq("id", user.id);
-                    setTeamDetails(team);
-                    setStep(4); // Move to Squad Hub
+                    // Initialize Virtual Team State for UI
+                    setTeamDetails({
+                        name: "Pending...",
+                        unique_code: "---",
+                        members: [] // Leader will be added virtually in UI or logic?
+                    });
+
+                    // Don't create anything in DB yet. Move to Name setup.
+                    setStep(2);
                 } else if (squadSubMode === "JOIN") {
-                    // Send Join Request
+                    // JOINERS: Still need user ID to send request?
+                    // User said "leave them", so we proceed with immediate creation for Joiners as they don't pay.
+                    const { data: user, error: regErr } = await registerUser(userParams);
+                    if (regErr) { setError(getFriendlyError(regErr)); return; }
+                    if (!user) { setError("Join failed."); return; }
+
+                    setUserId(user.id);
+                    setUserRole(user.role);
+
                     const { error: joinErr } = await requestJoinTeam(searchedTeam.id, user.id);
                     if (joinErr) {
                         setError(getFriendlyError(joinErr));
                         return;
                     }
                     setJoinRequestSent(true);
-                    setStep(4); // Move to "Waiting for Approval" view in Step 4
+                    setStep(4);
                 }
+            } else {
+                // SOLO MODE: DEFER REGISTRATION
+                const { error: availErr } = await checkUserAvailability(userParams.email, userParams.phone);
+
+                if (availErr) {
+                    setError(getFriendlyError(availErr));
+                    return;
+                }
+
+                setStep(2); // Move to Solo Protocol (Consent)
             }
         } catch (err: any) {
             setError(getFriendlyError(err));
@@ -425,7 +434,57 @@ function RegisterPageContent() {
             if (upErr) throw upErr;
 
             const { data: { publicUrl } } = supabase.storage.from("screenshots").getPublicUrl(upData.path);
-            const { error: payErr } = await submitPayment(userId!, {
+
+            let finalUserId = userId;
+
+            // LAZY REGISTRATION FOR SOLO USERS
+            if (!finalUserId && regMode === "SOLO") {
+                const userParams = {
+                    ...formData,
+                    tshirt_size: formData.tshirtSize,
+                    college: formData.college === "RGM" ? "RGM College" : formData.otherCollege,
+                    role: "MEMBER"
+                };
+
+                const { data: newUser, error: regErr } = await registerUser(userParams);
+                if (regErr) {
+                    setError(getFriendlyError(regErr));
+                    return;
+                }
+                if (!newUser) throw new Error("Registration failed.");
+                finalUserId = newUser.id;
+            }
+
+            // LAZY REGISTRATION FOR SQUAD (FORM)
+            if (!finalUserId && regMode === "SQUAD" && squadSubMode === "FORM") {
+                // 1. Register Leader
+                const userParams = {
+                    ...formData,
+                    tshirt_size: formData.tshirtSize,
+                    college: formData.college === "RGM" ? "RGM College" : formData.otherCollege,
+                    role: "LEADER"
+                };
+
+                const { data: user, error: regErr } = await registerUser(userParams);
+                if (regErr || !user) throw new Error(regErr?.message || "Leader registration failed");
+                finalUserId = user.id;
+
+                // 2. Create Team
+                const isRgm = userParams.college.toUpperCase().includes("RGM");
+                const { data: team, error: teamErr } = await createTeam(teamName, user.id, "BULK", isRgm ? 4 : 5);
+                if (teamErr) throw new Error(teamErr);
+
+                // 3. Update Leader with Team ID and Role
+                await supabase.from("users").update({ team_id: team.id, role: "LEADER" }).eq("id", user.id);
+
+                // 4. Register Bulk Members
+                if (additionalMembers.length > 0) {
+                    const { error: bulkErr } = await registerBulkMembers(user.id, team.id, additionalMembers);
+                    if (bulkErr) throw new Error(bulkErr);
+                }
+            }
+
+            const { error: payErr } = await submitPayment(finalUserId!, {
                 transaction_id: paymentProof.transaction_id,
                 screenshot_url: publicUrl,
                 assigned_qr_id: assignedQR?.id
@@ -550,8 +609,11 @@ function RegisterPageContent() {
                                         onClick={async () => {
                                             try {
                                                 setLoading(true);
+                                                // Fetch QR code immediately for solo users to avoid buffering
+                                                const qr = await getNextAvailableQR(800);
+                                                setAssignedQR(qr);
                                                 setFinalAmount(800);
-                                                setStep(5);
+                                                setStep(6); // Skip review, go straight to payment
                                             } catch (err: any) {
                                                 setError(getFriendlyError(err));
                                             } finally {

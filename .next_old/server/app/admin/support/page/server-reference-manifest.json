@@ -1,0 +1,35 @@
+{
+  "node": {
+    "0045fb994f6a9e3b4f8f97db2d30794be6f756fec9": {
+      "workers": {
+        "app/admin/support/page": {
+          "moduleId": 34144,
+          "async": false,
+          "exportedName": "getAllSupportTickets",
+          "filename": "lib/support-actions.ts"
+        }
+      },
+      "layer": {
+        "app/admin/support/page": "action-browser"
+      },
+      "exportedName": "getAllSupportTickets",
+      "filename": "lib/support-actions.ts"
+    },
+    "706fbe92ac19e57bdd6ff1dd9499f94ac059340643": {
+      "workers": {
+        "app/admin/support/page": {
+          "moduleId": 34144,
+          "async": false,
+          "exportedName": "respondToSupportTicket",
+          "filename": "lib/support-actions.ts"
+        }
+      },
+      "layer": {
+        "app/admin/support/page": "action-browser"
+      },
+      "exportedName": "respondToSupportTicket",
+      "filename": "lib/support-actions.ts"
+    }
+  },
+  "edge": {}
+}

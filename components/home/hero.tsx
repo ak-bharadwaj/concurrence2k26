@@ -10,16 +10,22 @@ import { FloatingLinesErrorBoundary } from "@/components/FloatingLinesErrorBound
 import { Button } from "@/components/ui/moving-border";
 
 export function Hero() {
+  // Respect user's motion preferences for accessibility and performance
+  const prefersReducedMotion = typeof window !== 'undefined'
+    ? window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    : false;
+
   return (
     <section className="relative min-h-screen flex items-center justify-center">
       {/* Background is now global */}
 
       <div className="container mx-auto px-4 text-center pt-24 sm:pt-20">
         <motion.div
-          initial={{ opacity: 0, y: 20 }}
+          initial={prefersReducedMotion ? { opacity: 1 } : { opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.8 }}
+          transition={prefersReducedMotion ? { duration: 0 } : { duration: 0.8 }}
           className="space-y-6"
+          style={{ willChange: 'transform, opacity' }}
         >
           {/* College Header - Prominent at Top */}
           <motion.div
@@ -61,6 +67,7 @@ export function Hero() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.3, duration: 0.8 }}
             className="relative"
+            style={{ willChange: 'transform, opacity' }}
           >
             <span
               className="block text-5xl sm:text-6xl md:text-8xl lg:text-9xl font-black tracking-tight"

@@ -1,0 +1,35 @@
+{
+  "node": {
+    "701fba58dcf8d9125f8abefc12d3b97ddf8184b8cf": {
+      "workers": {
+        "app/(main)/support/page": {
+          "moduleId": 25794,
+          "async": false,
+          "exportedName": "createTicket",
+          "filename": "lib/supabase-actions.ts"
+        }
+      },
+      "layer": {
+        "app/(main)/support/page": "action-browser"
+      },
+      "exportedName": "createTicket",
+      "filename": "lib/supabase-actions.ts"
+    },
+    "40bd76bae8ee6abac23d4a4fbef5630d6324698511": {
+      "workers": {
+        "app/(main)/support/page": {
+          "moduleId": 25794,
+          "async": false,
+          "exportedName": "getUserSupportTickets",
+          "filename": "lib/support-actions.ts"
+        }
+      },
+      "layer": {
+        "app/(main)/support/page": "action-browser"
+      },
+      "exportedName": "getUserSupportTickets",
+      "filename": "lib/support-actions.ts"
+    }
+  },
+  "edge": {}
+}

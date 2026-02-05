@@ -4,7 +4,7 @@ const nextConfig = {
     ignoreBuildErrors: true,
   },
   images: {
-    unoptimized: true,
+    // unoptimized: true, // Commented out to enable Vercel Image Optimization for speed
   },
 }
 
