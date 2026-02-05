@@ -280,18 +280,8 @@ function RegisterPageContent() {
                     });
                     setStep(4);
                 } else if (squadSubMode === "JOIN") {
-                    // JOINERS: IMMEDIATE REGISTRATION (UNPAID) for coordination
-                    const { data: user, error: regErr } = await registerUser({
-                        ...userParams,
-                        status: "UNPAID"
-                    });
-                    if (regErr || !user) {
-                        setError(getFriendlyError(regErr || "Registration failed"));
-                        return;
-                    }
-                    setUserId(user.id);
-                    // AUTO-TRIGGER JOIN REQUEST
-                    const success = await handleJoinRequest(user.id);
+                    // ZERO-LEAK: Don't register yet. Just send Join Request with candidate data.
+                    const success = await handleJoinRequest(null);
                     if (success) setStep(4);
                 }
             } else {

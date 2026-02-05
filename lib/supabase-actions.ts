@@ -521,23 +521,26 @@ export async function respondToJoinRequest(requestId: string, status: 'ACCEPTED'
 
     if (updateErr) throw updateErr;
 
-    if (request?.users?.email) {
+    const targetEmail = request.users?.email || request.candidate_data?.email;
+    const targetName = request.users?.name || request.candidate_data?.name || "Warrior";
+
+    if (targetEmail) {
         if (status === 'ACCEPTED') {
             await sendEmail(
-                request.users.email,
+                targetEmail,
                 "Welcome to the Squad! \uD83D\uDE80",
                 EMAIL_TEMPLATES.CUSTOM(
-                    request.users.name,
+                    targetName,
                     "Congratulations! You have joined the squad.",
                     "Great news! The team leader has accepted your request. You are now officially part of the squad. Please login to your dashboard to sync with your team and complete your payment to finalize your registration."
                 )
             );
         } else if (status === 'REJECTED') {
             await sendEmail(
-                request.users.email,
+                targetEmail,
                 "Update on your Squad Request",
                 EMAIL_TEMPLATES.CUSTOM(
-                    request.users.name,
+                    targetName,
                     "Squad Request Declined",
                     "Unfortunately, your request to join the squad was declined by the captain. Don't worry, you can still join other teams or participate independently."
                 )

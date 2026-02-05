@@ -4,7 +4,20 @@ const nextConfig = {
     ignoreBuildErrors: true,
   },
   images: {
-    // unoptimized: true, // Commented out to enable Vercel Image Optimization for speed
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: 'fqksvcwccfuevmbrlegi.supabase.co',
+        port: '',
+        pathname: '/storage/v1/object/public/**',
+      },
+      {
+        protocol: 'https',
+        hostname: 'api.qrserver.com',
+        port: '',
+        pathname: '/v1/**',
+      },
+    ],
   },
 }
 
