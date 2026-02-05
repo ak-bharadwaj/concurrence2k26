@@ -941,7 +941,11 @@ function RegisterPageContent() {
                                         <Image src={assignedQR.qr_image_url} alt="Payment QR" width={280} height={280} className="rounded-3xl" />
                                     ) : (
                                         <div className="w-[280px] h-[280px] bg-neutral-200 rounded-3xl flex items-center justify-center">
-                                            <Loader2 className="w-10 h-10 text-cyan-500 animate-spin" />
+                                            {assignedQR ? (
+                                                <div className="text-black font-bold text-center p-4 text-xs">QR Image Not Available</div>
+                                            ) : (
+                                                <Loader2 className="w-10 h-10 text-cyan-500 animate-spin" />
+                                            )}
                                         </div>
                                     )}
                                 </div>
