@@ -32,8 +32,8 @@ CREATE TABLE IF NOT EXISTS public.qr_codes (
     upi_name text DEFAULT 'TechSprint Event',
     category text DEFAULT 'MAIN',
     amount integer DEFAULT 800,
-    use_count integer DEFAULT 0,
-    is_active boolean DEFAULT true,
+    today_usage integer DEFAULT 0,
+    active boolean DEFAULT true,
     created_at timestamp with time zone DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 

@@ -10,7 +10,7 @@ export async function getNextAvailableQR(amount: number = 800) {
             .select("*")
             .eq("amount", amount)
             .eq("active", true)
-            .order("use_count", { ascending: true })
+            .order("today_usage", { ascending: true })
             .limit(1)
             .maybeSingle();
 
@@ -20,7 +20,7 @@ export async function getNextAvailableQR(amount: number = 800) {
         // Reverting to blocking await to prevent serverless execution freeze issues
         const { error: updateError } = await supabase
             .from("qr_codes")
-            .update({ use_count: qr.use_count + 1 })
+            .update({ today_usage: qr.today_usage + 1 })
             .eq("id", qr.id);
 
         if (updateError) {
@@ -44,7 +44,7 @@ export async function getNextAvailableQR(amount: number = 800) {
 export async function resetQRUsage() {
     const { error } = await supabase
         .from("qr_codes")
-        .update({ use_count: 0 });
+        .update({ today_usage: 0 });
     if (error) throw error;
     return true;
 }

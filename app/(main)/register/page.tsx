@@ -482,7 +482,10 @@ function RegisterPageContent() {
                 };
 
                 const { data: user, error: regErr } = await registerUser(userParams);
-                if (regErr || !user) throw new Error(typeof regErr === 'string' ? regErr : (regErr as any)?.message || "Leader registration failed");
+                if (regErr || !user) {
+                    console.error("Registration Error (SQUAD/LEADER):", regErr);
+                    throw new Error(typeof regErr === 'string' ? regErr : (regErr as any)?.message || "Leader registration failed");
+                }
                 finalUserId = user.id;
                 createdUserId = user.id; // Track for rollback
 
@@ -548,7 +551,13 @@ function RegisterPageContent() {
             setStep(7); // Move to Success Acknowledgment
 
         } catch (err: any) {
-            console.error("Registration/Payment Error:", JSON.stringify(err, null, 2));
+            let errorMsg = "Unknown error";
+            try {
+                errorMsg = JSON.stringify(err, null, 2);
+            } catch (jsonErr) {
+                errorMsg = String(err);
+            }
+            console.error("Registration/Payment Error:", errorMsg);
             setError(getFriendlyError(err));
 
             // ROLLBACK / COMPENSATION TRANSACTION
