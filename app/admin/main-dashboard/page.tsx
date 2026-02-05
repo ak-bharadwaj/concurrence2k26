@@ -97,6 +97,7 @@ export default function MainDashboard() {
     const [recentScans, setRecentScans] = useState<any[]>([]);
     const [emailModal, setEmailModal] = useState<{ userId: string, name: string } | null>(null);
     const [verificationGroup, setVerificationGroup] = useState<any>(null);
+    const [emailSubject, setEmailSubject] = useState("");
     const [emailMessage, setEmailMessage] = useState("");
     const fetchTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
 
