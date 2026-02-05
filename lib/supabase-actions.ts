@@ -17,10 +17,15 @@ export async function getNextAvailableQR(amount: number = 800) {
         if (error) throw error;
         if (!qr) return null;
 
-        await supabase
+        // FIRE AND FORGET: Update usage count without awaiting
+        // This speeds up the response time significantly for the user
+        supabase
             .from("qr_codes")
             .update({ use_count: qr.use_count + 1 })
-            .eq("id", qr.id);
+            .eq("id", qr.id)
+            .then(({ error }) => {
+                if (error) console.error("Background QR update failed:", error);
+            });
 
         return qr;
     } catch (err: any) {

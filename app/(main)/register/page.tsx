@@ -245,6 +245,24 @@ function RegisterPageContent() {
         return () => { requestSub.unsubscribe(); };
     }, [teamDetails?.id, regMode, squadSubMode]); // Optimized deps
 
+    // PREFETCH QR FOR SOLO USERS IN STEP 2
+    useEffect(() => {
+        if (step === 2 && regMode === "SOLO" && !assignedQR) {
+            getNextAvailableQR(800).then(qr => {
+                if (qr) setAssignedQR(qr);
+            });
+        }
+    }, [step, regMode, assignedQR]);
+
+    // PREFETCH QR FOR SQUADS IN STEP 5 (Review)
+    useEffect(() => {
+        if (step === 5 && regMode === "SQUAD" && !assignedQR && finalAmount) {
+            getNextAvailableQR(finalAmount).then(qr => {
+                if (qr) setAssignedQR(qr);
+            });
+        }
+    }, [step, regMode, assignedQR, finalAmount]);
+
     const handleRespondToRequest = async (requestId: string, status: 'ACCEPTED' | 'REJECTED') => {
         try {
             setLoading(true);
@@ -659,11 +677,13 @@ function RegisterPageContent() {
                                         onClick={async () => {
                                             try {
                                                 setLoading(true);
-                                                // Fetch QR code immediately for solo users to avoid buffering
-                                                const qr = await getNextAvailableQR(800);
-                                                setAssignedQR(qr);
+                                                // QR prefetch is handled by useEffect, but we double check here
+                                                if (!assignedQR) {
+                                                    const qr = await getNextAvailableQR(800);
+                                                    setAssignedQR(qr);
+                                                }
                                                 setFinalAmount(800);
-                                                setStep(6); // Skip review, go straight to payment
+                                                setStep(6);
                                             } catch (err: any) {
                                                 setError(getFriendlyError(err));
                                             } finally {
