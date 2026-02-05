@@ -9,7 +9,7 @@ export async function getNextAvailableQR(amount: number = 800) {
             .from("qr_codes")
             .select("*")
             .eq("amount", amount)
-            .eq("is_active", true)
+            .eq("active", true)
             .order("use_count", { ascending: true })
             .limit(1)
             .maybeSingle();

@@ -27,7 +27,8 @@ import {
     ExternalLink,
     Activity,
     Clock,
-    ArrowLeft
+    ArrowLeft,
+    Download
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import {
