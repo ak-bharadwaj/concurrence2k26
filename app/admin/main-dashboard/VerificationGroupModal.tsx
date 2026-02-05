@@ -1,7 +1,7 @@
 
 import { X, CheckCircle2, AlertCircle, ExternalLink, Calendar, Users, Crown, AlertTriangle } from "lucide-react";
 import Image from "next/image";
-import { useState } from "react";
+import React, { useState } from "react";
 
 export function VerificationGroupModal({ group, onClose, onApprove, onReject, onApproveMember }: {
     group: any,

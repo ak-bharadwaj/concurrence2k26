@@ -1,5 +1,5 @@
 import { X, Copy, CheckCircle2, Edit3, Save } from "lucide-react";
-import { useState } from "react";
+import React, { useState } from "react";
 import Image from "next/image";
 
 export function MemberDetailModal({ user, onClose, onSave }: { user: any, onClose: () => void, onSave?: (id: string, field: string, value: any) => void }) {
