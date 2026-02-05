@@ -75,7 +75,7 @@ export async function createTeam(name: string, leaderId: string, paymentMode: "I
 
             if (error) {
                 console.error("SUPABASE ERROR in createTeam:", error);
-                return { error };
+                return { error: error.message || "Squad creation failed. Please try again." };
             }
             team = data;
             break;
@@ -218,7 +218,10 @@ export async function registerUser(userData: {
 
         if (error) {
             console.error("SUPABASE ERROR in registerUser:", error);
-            return { error };
+            if (error.code === '42703') {
+                return { error: "Database Sync Required: Please run the 'add_tshirt_column.sql' script in your Supabase SQL Editor to enable t-shirt size selection." };
+            }
+            return { error: error.message || "Registration failed. Please try again." };
         }
 
         // Send Welcome Email (Non-blocking)
@@ -286,7 +289,7 @@ export async function submitPayment(userId: string, paymentData: {
 
         if (error) {
             console.error("SUPABASE ERROR in submitPayment:", error);
-            return { error };
+            return { error: error.message || "Payment submission failed." };
         }
 
         // 4. If it's a BULK leader, push all members to PENDING for verification
@@ -428,7 +431,7 @@ export async function approveTeamPayment(
 
         if (uErr) {
             console.error("ERROR updating member statuses:", uErr);
-            return { error: uErr };
+            return { error: (uErr as any).message || "Approval failed." };
         }
 
         // 3. Log the action
@@ -660,7 +663,10 @@ export async function registerBulkMembers(leaderId: string, teamId: string, memb
 
         if (error) {
             console.error("SUPABASE ERROR in registerBulkMembers:", error);
-            return { error };
+            if (error.code === '42703') {
+                return { error: "Database Sync Required: Please run the 'add_tshirt_column.sql' script in your Supabase SQL Editor." };
+            }
+            return { error: error.message || "Bulk registration failed." };
         }
         return { data };
     } catch (err: any) {
