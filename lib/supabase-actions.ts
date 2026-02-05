@@ -243,6 +243,21 @@ export async function registerUser(userData: {
     }
 }
 
+export async function purgeUnpaidUsers() {
+    try {
+        const { error } = await supabase
+            .from("users")
+            .delete()
+            .eq("status", "UNPAID");
+
+        if (error) throw error;
+        return { success: true };
+    } catch (err: any) {
+        console.error("Purge Error:", err);
+        return { error: err.message };
+    }
+}
+
 export async function checkUserAvailability(email: string, phone: string) {
     try {
         // 1. Check existing via Email
@@ -534,11 +549,18 @@ export async function deleteUser(userId: string) {
 // --- Squad & Unstop Flow Helpers ---
 
 export async function requestJoinTeam(teamId: string, userId: string) {
-    const { error } = await supabase
-        .from("join_requests")
-        .insert([{ team_id: teamId, user_id: userId, status: 'PENDING' }]);
-    if (error) throw error;
-    return true;
+    try {
+        const { data, error } = await supabase
+            .from("join_requests")
+            .insert([{ team_id: teamId, user_id: userId, status: 'PENDING' }])
+            .select()
+            .single();
+
+        if (error) return { error: error.message };
+        return { data };
+    } catch (err: any) {
+        return { error: err.message };
+    }
 }
 // 9. Get Join Requests for a Team
 export async function getJoinRequests(teamId: string, status: 'PENDING' | 'ACCEPTED' | 'COMPLETED' = 'PENDING') {

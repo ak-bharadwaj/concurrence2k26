@@ -38,7 +38,7 @@ import { Scanner } from "@yudiel/react-qr-scanner";
 import ExcelJS from "exceljs";
 import { supabase } from "@/lib/supabase";
 import { getAdminSession, adminLogout } from "@/lib/auth";
-import { updateStatus, getActiveGroupLink, deleteUser, resetQRUsage, markAttendance, fetchAttendanceReport, sendCustomUserEmail, approveTeamPayment, createTeam, deleteTeam } from "@/lib/supabase-actions";
+import { updateStatus, getActiveGroupLink, deleteUser, resetQRUsage, markAttendance, fetchAttendanceReport, sendCustomUserEmail, approveTeamPayment, createTeam, deleteTeam, purgeUnpaidUsers } from "@/lib/supabase-actions";
 import { getFriendlyError } from "@/lib/error-handler";
 import Image from "next/image";
 import dynamic from "next/dynamic";
@@ -231,6 +231,22 @@ export default function MainDashboard() {
         }
     };
 
+    const handlePurgeUnpaid = async () => {
+        if (!confirm("CRITICAL ACTION: This will permanently delete ALL 'UNPAID' users from the database. These are usually abandoned registrations. This cannot be undone. Proceed?")) return;
+
+        setLoading(true);
+        try {
+            const { error } = await purgeUnpaidUsers();
+            if (error) throw new Error(error);
+            alert("Purge successful! All abandoned UNPAID records removed.");
+            fetchAllData(); // Refresh UI
+        } catch (err: any) {
+            alert(getFriendlyError(err));
+        } finally {
+            setLoading(false);
+        }
+    };
+
     const handleAdd = async (e: React.FormEvent) => {
         e.preventDefault();
         if (loading) return;
@@ -365,6 +381,9 @@ export default function MainDashboard() {
 
             const [users, admins, qr, emails, groups, logs, teams, joinRequests] = results.map(r => r.data);
 
+            // STRICT FILTERING: Data used for summary counts and main list must ignore UNPAID/JOIN_PENDING
+            const activeUsers = (users || []).filter((u: any) => !['UNPAID', 'JOIN_PENDING'].includes(u.status));
+
             const processedUsers = (users || []).map((u: any) => {
                 const request = (joinRequests || []).find((r: any) => r.user_id === u.id);
                 return {
@@ -399,7 +418,7 @@ export default function MainDashboard() {
                     };
                 }),
                 // Filter out users who have a team_id (truthy)
-                ...(users || []).filter((u: any) => !u.team_id).map((u: any) => ({
+                ...(users || []).filter((u: any) => !u.team_id && !['UNPAID', 'JOIN_PENDING'].includes(u.status)).map((u: any) => ({
                     id: `SOLO-${u.id}`,
                     name: `${u.name}`,
                     unique_code: 'SOLO',
@@ -960,6 +979,9 @@ export default function MainDashboard() {
     };
 
     const filteredUsers = data.users.filter((u: any) => {
+        // Apply hideIncomplete filter first if enabled
+        if (hideIncomplete && u.status === 'UNPAID') return false;
+
         const matchesSearch =
             u.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
             u.reg_no.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -1153,7 +1175,8 @@ export default function MainDashboard() {
 
             // 1. Create Team using Server Action (Ensures Sequential ID)
             // Using 'BULK' payment mode and max_members 5 (Admin override)
-            const team = await createTeam(name, admin.id, 'BULK', 5);
+            const { data: team, error: teamErr } = await createTeam(name, admin.id, 'BULK', 5);
+            if (teamErr || !team) throw new Error(teamErr || "Team creation failed");
 
             // 2. Add members
             const [firstId, ...restIds] = selectedUsers;
@@ -1177,7 +1200,7 @@ export default function MainDashboard() {
             setSelectedUsers([]);
             setTeamViewMode('ALL'); // Show new squad
             fetchAllData();
-            alert(`Squad "${name}" formed successfully with Team # ${team.team_number || 'Generated'}`);
+            alert(`Squad "${name}" formed successfully with Team # ${team?.team_number || 'Generated'}`);
         } catch (err: any) { alert(err.message); } finally { setLoading(false); }
     };
 
@@ -1274,11 +1297,6 @@ export default function MainDashboard() {
             alert("Scan failed: " + err.message);
         }
     };
-
-    // Simplified derived state to avoid hook build errors (Performance impact negligible for <5k users)
-    const filteredUsers = hideIncomplete
-        ? data.users.filter((u: any) => u.status !== 'UNPAID')
-        : data.users;
 
     const filteredTeams = hideIncomplete
         ? data.teams.filter((t: any) => t.isVirtual ? t.members[0]?.status !== 'UNPAID' : t.members.some((m: any) => m.status !== 'UNPAID'))
@@ -1421,6 +1439,13 @@ export default function MainDashboard() {
                                     <Upload className="w-3 h-3" /> <span className="hidden sm:inline">Imp</span>
                                     <input type="file" accept=".csv" onChange={handleImportCSV} className="hidden" />
                                 </label>
+                                <button
+                                    onClick={handlePurgeUnpaid}
+                                    className="flex items-center gap-2 bg-red-500/10 border border-red-500/50 px-3 py-2 rounded-lg text-[10px] font-black text-red-500 hover:bg-red-500 hover:text-white transition-all uppercase tracking-widest whitespace-nowrap"
+                                    title="Delete all UNPAID users"
+                                >
+                                    <Trash2 className="w-3 h-3" /> <span className="hidden sm:inline">Purge Unpaid</span>
+                                </button>
                             </div>
                         )}
 

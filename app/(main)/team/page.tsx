@@ -752,7 +752,8 @@ export default function TeamPage() {
                                             if (!newMemberRegNo) return;
                                             try {
                                                 setLoading(true);
-                                                const teamResult = await joinTeam(newMemberRegNo);
+                                                const { data: teamResult, error: joinErr } = await joinTeam(newMemberRegNo);
+                                                if (joinErr) throw new Error(joinErr);
                                                 if (confirm(`Squad "${teamResult.name}" found. Send join request?`)) {
                                                     await requestJoinTeam(teamResult.id, user.id);
                                                     alert("Signal sent to Captain! Await approval on your dashboard.");

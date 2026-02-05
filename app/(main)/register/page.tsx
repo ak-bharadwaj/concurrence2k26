@@ -277,21 +277,15 @@ function RegisterPageContent() {
                     // Don't create anything in DB yet. Move to Name setup.
                     setStep(2);
                 } else if (squadSubMode === "JOIN") {
-                    // JOINERS: Still need user ID to send request?
-                    // User said "leave them", so we proceed with immediate creation for Joiners as they don't pay.
-                    const { data: user, error: regErr } = await registerUser(userParams);
-                    if (regErr) { setError(getFriendlyError(regErr)); return; }
-                    if (!user) { setError("Join failed."); return; }
-
-                    setUserId(user.id);
-                    setUserRole(user.role);
-
-                    const { error: joinErr } = await requestJoinTeam(searchedTeam.id, user.id);
-                    if (joinErr) {
-                        setError(getFriendlyError(joinErr));
+                    // JOINERS: DEFER REGISTRATION
+                    // We check availability first, but don't write to DB yet.
+                    const { error: availErr } = await checkUserAvailability(userParams.email, userParams.phone);
+                    if (availErr) {
+                        setError(getFriendlyError(availErr));
                         return;
                     }
-                    setJoinRequestSent(true);
+
+                    // Move to Step 4 to show the team they want to join
                     setStep(4);
                 }
             } else {
@@ -377,18 +371,7 @@ function RegisterPageContent() {
             setLoading(true);
 
             // EXECUTE DEFERRED WRITE
-            if (additionalMembers.length > 0) {
-                const { error: bulkErr } = await registerBulkMembers(userId!, teamDetails.id, additionalMembers);
-                if (bulkErr) {
-                    setError(getFriendlyError(bulkErr));
-                    return;
-                }
-                // We keep additionalMembers in state until payment is done or just let them stay?
-                // Better to clear them so if they go back they don't see duplicates?
-                // No, if we clear them, we can't show them in Review if they come back from payment step.
-                // But we just wrote them to DB. If we come back, they should be in teamDetails.members via realtime subscription.
-                setAdditionalMembers([]);
-            }
+            // [REMOVED] Premature write. All writes must happen in handlePaymentSubmit.
 
             const qr = await getNextAvailableQR(finalAmount || 800);
             setAssignedQR(qr);
@@ -401,11 +384,24 @@ function RegisterPageContent() {
     const handleJoinRequest = async () => {
         try {
             setLoading(true);
-            const { error: joinErr } = await requestJoinTeam(searchedTeam.id, userId!);
-            if (joinErr) {
-                setError(getFriendlyError(joinErr));
-                return;
-            }
+
+            const userParams = {
+                ...formData,
+                tshirt_size: formData.tshirtSize,
+                college: formData.college === "RGM" ? "RGM College" : formData.otherCollege,
+                role: "MEMBER",
+                status: "JOIN_PENDING" as const // Distinguish from regular participants
+            };
+
+            const { data: user, error: regErr } = await registerUser(userParams);
+            if (regErr || !user) throw new Error(regErr?.message || "Joiner registration failed");
+
+            setUserId(user.id);
+            setUserRole("MEMBER");
+
+            const { error: joinErr } = await requestJoinTeam(searchedTeam.id, user.id);
+            if (joinErr) throw joinErr;
+
             setJoinRequestSent(true);
         } catch (err: any) { setError(getFriendlyError(err)); } finally { setLoading(false); }
     };
