@@ -947,8 +947,8 @@ function RegisterPageContent() {
                                 </p>
 
                                 <div className="relative p-4 bg-white rounded-[2.5rem] shadow-2xl group transition-all duration-500 hover:scale-105 active:scale-95">
-                                    {assignedQR?.qr_url ? (
-                                        <Image src={assignedQR.qr_url} alt="Payment QR" width={280} height={280} className="rounded-3xl" />
+                                    {assignedQR?.qr_image_url ? (
+                                        <Image src={assignedQR.qr_image_url} alt="Payment QR" width={280} height={280} className="rounded-3xl" />
                                     ) : (
                                         <div className="w-[280px] h-[280px] bg-neutral-200 rounded-3xl flex items-center justify-center">
                                             <Loader2 className="w-10 h-10 text-cyan-500 animate-spin" />
@@ -957,7 +957,7 @@ function RegisterPageContent() {
                                 </div>
 
                                 <a
-                                    href={assignedQR?.qr_url}
+                                    href={assignedQR?.qr_image_url || "#"}
                                     download="Hackathon_Payment_QR.png"
                                     className="px-8 py-3 bg-white/5 border border-white/10 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-white/10 transition-all flex items-center gap-2"
                                 >
@@ -978,14 +978,18 @@ function RegisterPageContent() {
                                 ) : (
                                     <>
                                         <p className="text-[10px] text-white/40 uppercase tracking-widest mb-1 font-bold">Payable amount</p>
-                                        <p className="text-4xl sm:text-5xl font-black text-white tracking-tighter">₹{finalAmount}</p>
+                                        <p className="text-4xl sm:text-5xl font-black text-white tracking-tighter">₹{finalAmount || 0}</p>
                                         <div className="bg-white p-3 rounded-2xl w-40 h-40 sm:w-48 sm:h-48 mx-auto my-6 shadow-[0_0_40px_rgba(255,255,255,0.1)]">
-                                            <Image src={assignedQR?.qr_image_url || "https://placehold.co/400x400/png?text=DEFAULT+QR"} alt="Pay" width={200} height={200} className="w-full h-full object-contain" />
+                                            {assignedQR?.qr_image_url ? (
+                                                <Image src={assignedQR.qr_image_url} alt="Pay" width={200} height={200} className="w-full h-full object-contain" />
+                                            ) : (
+                                                <div className="w-full h-full bg-neutral-200 flex items-center justify-center text-black font-black text-[10px] uppercase text-center p-4">QR Signal Lost. Refresh.</div>
+                                            )}
                                         </div>
                                         <div className="space-y-2">
                                             <p className="text-xs font-black uppercase text-white/60">{assignedQR?.upi_name || "Payment Portal"}</p>
                                             <div className="flex items-center justify-center gap-2 bg-white/5 py-2.5 px-4 rounded-xl font-mono text-cyan-400 border border-white/5 text-xs active:bg-white/10 transition-all cursor-pointer" onClick={() => assignedQR?.upi_id && navigator.clipboard.writeText(assignedQR.upi_id)}>
-                                                {assignedQR?.upi_id || "No UPI ID assigned"} <Copy className="w-3 h-3" />
+                                                {assignedQR?.upi_id || "No UPI ID found"} <Copy className="w-3 h-3" />
                                             </div>
                                         </div>
                                     </>
@@ -1138,15 +1142,16 @@ function ChoiceCard({ icon: Icon, title, desc, color, onClick }: any) {
 
 function MemberRow({ name, role, status, color, onRemove }: any) {
     const statusColor = status === "APPROVED" ? "bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)]" : "bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]";
+    const initial = (name && typeof name === 'string' && name.length > 0) ? name[0] : "?";
     return (
         <div className="flex items-center justify-between p-4 bg-white/5 border border-white/10 rounded-2xl group relative overflow-hidden backdrop-blur-md">
             <div className="flex items-center gap-4">
-                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-neutral-800 to-neutral-700 flex items-center justify-center font-black text-xs ring-2 ring-white/10">{name[0]}</div>
+                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-neutral-800 to-neutral-700 flex items-center justify-center font-black text-xs ring-2 ring-white/10">{initial}</div>
                 <div>
-                    <p className="text-sm font-black flex items-center gap-1.5 tracking-tight">{name} {role === 'LEADER' && <Crown className="w-3.5 h-3.5 text-yellow-400" />}</p>
+                    <p className="text-sm font-black flex items-center gap-1.5 tracking-tight">{name || "Unnamed Warrior"} {role === 'LEADER' && <Crown className="w-3.5 h-3.5 text-yellow-400" />}</p>
                     <div className="flex items-center gap-2 mt-0.5">
                         <div className={`w-1.5 h-1.5 rounded-full ${statusColor}`} />
-                        <span className="text-[9px] uppercase font-black tracking-widest text-white/30">{status}</span>
+                        <span className="text-[9px] uppercase font-black tracking-widest text-white/30">{status || "UNKNOWN"}</span>
                     </div>
                 </div>
             </div>
