@@ -812,18 +812,21 @@ function RegisterPageContent() {
                                             <p className="text-xs text-yellow-500 font-bold uppercase tracking-widest pl-1 flex items-center gap-2">
                                                 <Activity className="w-3 h-3" /> Requests
                                             </p>
-                                            {pendingRequests.map((req) => (
-                                                <div key={req.id} className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/5">
-                                                    <div>
-                                                        <p className="text-xs font-bold">{req.users.name}</p>
-                                                        <p className="text-[9px] text-white/40 uppercase tracking-tighter">{req.users.reg_no} • {req.users.college}</p>
+                                            {pendingRequests.map((req) => {
+                                                const userData = req.users || req.candidate_data || {};
+                                                return (
+                                                    <div key={req.id} className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/5">
+                                                        <div>
+                                                            <p className="text-xs font-bold">{userData.name || "Unknown"}</p>
+                                                            <p className="text-[9px] text-white/40 uppercase tracking-tighter">{userData.reg_no || "---"} • {userData.college || "N/A"}</p>
+                                                        </div>
+                                                        <div className="flex gap-2">
+                                                            <button onClick={() => handleRespondToRequest(req.id, 'REJECTED')} className="p-2 text-red-500 hover:bg-neutral-800 rounded-lg"><X className="w-4 h-4" /></button>
+                                                            <button onClick={() => handleRespondToRequest(req.id, 'ACCEPTED')} className="p-2 text-green-500 hover:bg-neutral-800 rounded-lg"><CheckCircle2 className="w-4 h-4" /></button>
+                                                        </div>
                                                     </div>
-                                                    <div className="flex gap-2">
-                                                        <button onClick={() => handleRespondToRequest(req.id, 'REJECTED')} className="p-2 text-red-500 hover:bg-neutral-800 rounded-lg"><X className="w-4 h-4" /></button>
-                                                        <button onClick={() => handleRespondToRequest(req.id, 'ACCEPTED')} className="p-2 text-green-500 hover:bg-neutral-800 rounded-lg"><CheckCircle2 className="w-4 h-4" /></button>
-                                                    </div>
-                                                </div>
-                                            ))}
+                                                );
+                                            })}
                                         </div>
                                     )}
 
