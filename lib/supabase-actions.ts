@@ -4,146 +4,112 @@ import { supabase } from "./supabase";
 import { sendEmail, EMAIL_TEMPLATES } from "./email";
 
 export async function getNextAvailableQR(amount: number = 800) {
-    // We need to find an active QR for the amount that hasn't hit its daily limit
-    const { data: qrs, error } = await supabase
-        .from("qr_codes")
-        .select("*")
-        .eq("active", true)
-        .eq("amount", amount)
-        .order("today_usage", { ascending: true }); // Get all, then filter to ensure we handle the limit check properly
-
-    if (error) throw error;
-
-    // Filter for available capacity
-    const available = qrs?.find(q => q.today_usage < q.daily_limit);
-
-    if (!available) {
-        // Fallback: try to find any active QR with capacity if specific amount is exhausted
-        const { data: fallback } = await supabase
+    try {
+        const { data: qr, error } = await supabase
             .from("qr_codes")
             .select("*")
-            .eq("active", true)
-            .order("today_usage", { ascending: true });
+            .eq("amount", amount)
+            .eq("is_active", true)
+            .order("use_count", { ascending: true })
+            .limit(1)
+            .maybeSingle();
 
-        return fallback?.find(q => q.today_usage < q.daily_limit) || fallback?.[0] || null;
+        if (error) throw error;
+        if (!qr) return null;
+
+        await supabase
+            .from("qr_codes")
+            .update({ use_count: qr.use_count + 1 })
+            .eq("id", qr.id);
+
+        return qr;
+    } catch (err: any) {
+        console.error("Error fetching QR:", err);
+        return null;
     }
-
-    return available;
 }
 
 export async function resetQRUsage() {
     const { error } = await supabase
         .from("qr_codes")
-        .update({ today_usage: 0 })
-        .eq("active", true); // Only reset active ones or all? Usually all.
-
+        .update({ use_count: 0 });
     if (error) throw error;
     return true;
 }
 
-export async function createTeam(name: string, leaderId: string, paymentMode: "INDIVIDUAL" | "BULK" = "INDIVIDUAL", maxMembers: number = 5) {
-    try {
-        let team = null;
-        let attempts = 0;
+export async function createTeam(name: string, leaderId: string | null, paymentMode: "INDIVIDUAL" | "BULK" = "INDIVIDUAL", maxMembers: number = 5) {
+    // Generate unique 6-digit code
+    const code = Math.random().toString(36).substring(2, 8).toUpperCase();
 
-        // Use Postgres RPC for atomic team number generation
-        const { data: team_number, error: rpcErr } = await supabase.rpc('generate_team_number');
-        if (rpcErr) {
-            console.error("Error generating team number via RPC:", rpcErr);
-            return { error: "Database initialization required. Please ask admin to run the setup script." };
-        }
+    const { data: team, error } = await supabase
+        .from("teams")
+        .insert([{
+            name: name.trim(),
+            unique_code: code,
+            leader_id: leaderId,
+            payment_mode: paymentMode,
+            max_members: maxMembers,
+            status: "PENDING"
+        }])
+        .select()
+        .single();
 
-        while (attempts < 5) {
-            const unique_code = Math.random().toString(36).substring(2, 8).toUpperCase();
-            const { data, error } = await supabase
+    if (error) {
+        if (error.code === '23505') {
+            // Uniqueness constraint hit - try once more with different code
+            const newCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+            const { data: retryTeam, error: retryErr } = await supabase
                 .from("teams")
                 .insert([{
-                    name,
-                    unique_code,
+                    name: name.trim(),
+                    unique_code: newCode,
                     leader_id: leaderId,
                     payment_mode: paymentMode,
                     max_members: maxMembers,
-                    team_number
+                    status: "PENDING"
                 }])
                 .select()
                 .single();
-
-            if (error && error.code === '23505' && error.message.includes('unique_code')) {
-                attempts++;
-                continue;
-            }
-
-            if (error) {
-                console.error("SUPABASE ERROR in createTeam:", error);
-                return { error: error.message || "Squad creation failed. Please try again." };
-            }
-            team = data;
-            break;
+            if (retryErr) throw retryErr;
+            return { data: retryTeam };
         }
-
-        if (!team) return { error: "Failed to generate a unique squad identity. Please try again." };
-        return { data: team };
-    } catch (err: any) {
-        console.error("UNEXPECTED ERROR in createTeam:", err);
-        return { error: err.message || "An unexpected error occurred during squad creation." };
+        throw error;
     }
+
+    return { data: team };
 }
 
 export async function joinTeam(code: string) {
-    try {
-        const { data: team, error } = await supabase
-            .from("teams")
-            .select("*")
-            .eq("unique_code", code.trim().toUpperCase())
-            .single();
+    const { data: team, error } = await supabase
+        .from("teams")
+        .select("*, leader:users!fk_team_leader(*)")
+        .eq("unique_code", code.trim().toUpperCase())
+        .maybeSingle();
 
-        if (error) {
-            console.error("ERROR finding squad:", error);
-            return { error: "Squad not found. Please verify the code and try again." };
-        }
+    if (error) throw error;
+    if (!team) return { error: "Squad not found. Please check the code." };
 
-        // Check if team is full
-        const { count: memberCount } = await supabase
-            .from("users")
-            .select("*", { count: 'exact', head: true })
-            .eq("team_id", team.id);
-
-        const totalMembers = (memberCount || 0);
-
-        if (totalMembers >= (team.max_members || 5)) {
-            return { error: `Oops, looks like you're late! This squad '${team.name}' is already at maximum capacity.` };
-        }
-
-        return { data: team };
-    } catch (err: any) {
-        console.error("UNEXPECTED ERROR in joinTeam:", err);
-        return { error: err.message || "An unexpected error occurred while searching for the squad." };
-    }
+    return { data: team };
 }
 
 export async function getTeamDetails(teamId: string) {
-    const { data: team, error: tErr } = await supabase
+    const { data, error } = await supabase
         .from("teams")
-        .select("*")
+        .select(`
+            *,
+            members:users(*)
+        `)
         .eq("id", teamId)
         .single();
 
-    if (tErr) throw tErr;
-
-    const { data: members, error: mErr } = await supabase
-        .from("users")
-        .select("name, status, role")
-        .eq("team_id", teamId);
-
-    if (mErr) throw mErr;
-
-    return { ...team, members };
+    if (error) throw error;
+    return data;
 }
 
 export async function createTicket(userId: string | null, issueType: string, description: string) {
     const { error } = await supabase
         .from("support_tickets")
-        .insert([{ user_id: userId, issue_type: issueType, description: description }]);
+        .insert([{ user_id: userId, issue_type: issueType, description, status: "OPEN" }]);
     if (error) throw error;
     return true;
 }
@@ -244,49 +210,30 @@ export async function registerUser(userData: {
 }
 
 export async function purgeUnpaidUsers() {
-    try {
-        const { error } = await supabase
-            .from("users")
-            .delete()
-            .eq("status", "UNPAID");
-
-        if (error) throw error;
-        return { success: true };
-    } catch (err: any) {
-        console.error("Purge Error:", err);
-        return { error: err.message };
-    }
+    const { error } = await supabase
+        .from("users")
+        .delete()
+        .eq("status", "UNPAID");
+    if (error) throw error;
+    return true;
 }
 
 export async function checkUserAvailability(email: string, phone: string) {
-    try {
-        // 1. Check existing via Email
-        const { data: existingUser } = await supabase
-            .from("users")
-            .select("status")
-            .eq("email", email)
-            .maybeSingle();
+    const { data, error } = await supabase
+        .from("users")
+        .select("id, status")
+        .or(`email.eq.${email.trim().toLowerCase()},phone.eq.${phone.trim()}`);
 
-        if (existingUser && ["APPROVED", "PENDING", "VERIFYING"].includes(existingUser.status)) {
-            return { error: "This email is already registered and locked. Please contact support." };
-        }
+    if (error) return { error };
 
-        // 2. Check existing via Phone
-        const { data: phoneUser } = await supabase
-            .from("users")
-            .select("status")
-            .eq("phone", phone)
-            .neq("email", email)
-            .maybeSingle();
+    const lockedStatuses = ["PENDING", "APPROVED", "VERIFYING"];
+    const conflict = data?.find(u => lockedStatuses.includes(u.status));
 
-        if (phoneUser) {
-            return { error: "This phone number is already linked to another registration." };
-        }
-
-        return { success: true };
-    } catch (err: any) {
-        return { error: err.message || "Availability check failed." };
+    if (conflict) {
+        return { error: "User already registered or payment pending." };
     }
+
+    return { data: true };
 }
 
 // 2. Submit Payment Details
@@ -296,61 +243,25 @@ export async function submitPayment(userId: string, paymentData: {
     assigned_qr_id?: string;
 }) {
     try {
-        // 0. Validate Transaction ID
-        const txId = paymentData.transaction_id?.trim();
-        if (!txId || txId.length < 12 || txId.length > 20) {
-            return { error: "Transaction ID must be between 12 and 20 characters." };
-        }
-
-        // 0b. Check for duplicate Transaction ID
-        const { data: existingTx } = await supabase
-            .from("users")
-            .select("id")
-            .eq("transaction_id", txId)
-            .neq("id", userId)
-            .maybeSingle();
-
-        if (existingTx) {
-            return { error: "This Transaction ID has already been submitted by another user." };
-        }
-
-        // 1. Fetch user and team info to check for BULK mode
-        const { data: user, error: uErr } = await supabase
-            .from("users")
-            .select("*, teams!team_id(*)")
-            .eq("id", userId)
-            .single();
-
-        if (uErr) {
-            console.error("ERROR fetching user for payment:", uErr);
-            return { error: "Failed to verify user identity for payment submission." };
-        }
-
-        const isBulkLeader = user.role === 'LEADER' && user.teams?.payment_mode === 'BULK' && user.team_id;
-
-        // 3. Update the payer's status
-        const { error } = await supabase
+        const { data: user, error: userErr } = await supabase
             .from("users")
             .update({
-                ...paymentData,
+                transaction_id: paymentData.transaction_id,
+                screenshot_url: paymentData.screenshot_url,
+                assigned_qr_id: paymentData.assigned_qr_id,
                 status: "PENDING"
             })
-            .eq("id", userId);
+            .eq("id", userId)
+            .select("*, teams(*)")
+            .single();
 
-        if (error) {
-            console.error("SUPABASE ERROR in submitPayment:", error);
-            return { error: error.message || "Payment submission failed." };
-        }
+        if (userErr) throw userErr;
 
-        // 4. If it's a BULK leader, push all members to PENDING for verification
-        if (isBulkLeader) {
-            await supabase
-                .from("users")
-                .update({ status: "PENDING" })
-                .eq("team_id", user.team_id)
-                .neq("id", userId)
-                .in("status", ["UNPAID", "REJECTED"]);
-        }
+        // If this user is a MEMBER of a team, and the team is INDIVIDUAL payment, 
+        // we might want to check if they are the last one to pay (not required for now)
+
+        // If this user is part of a squad, auto-reject their other pending join requests
+        await supabase.from("join_requests").update({ status: 'COMPLETED' }).eq("user_id", userId).neq("status", "COMPLETED");
 
         // Send Email (Non-blocking)
         sendEmail(user.email, "Payment Received - Hackathon 2K26", EMAIL_TEMPLATES.PAYMENT_RECEIVED(user.name));
@@ -371,7 +282,6 @@ export async function updateStatus(
 ) {
     const updateData: any = { status: newStatus };
 
-    // Record who performed the action if it's a final state
     if (newStatus === "APPROVED" || newStatus === "REJECTED") {
         updateData.verified_by = adminId;
     }
@@ -380,7 +290,6 @@ export async function updateStatus(
         .from("users")
         .update(updateData)
         .eq("id", userId)
-        // Race condition protection: Only update if not already in the target status
         .neq("status", newStatus)
         .select("*, teams!team_id(*)")
         .single();
@@ -388,17 +297,15 @@ export async function updateStatus(
     if (error) throw error;
     if (!user) return null;
 
-    // If newStatus is APPROVED and they are a leader of a BULK team, approve all members
     if (newStatus === "APPROVED" && user.role === "LEADER" && user.teams?.payment_mode === "BULK" && user.team_id) {
         await supabase
             .from("users")
             .update({ status: "APPROVED", verified_by: adminId })
             .eq("team_id", user.team_id)
             .neq("status", "APPROVED")
-            .neq("status", "REJECTED"); // Don't auto-approve someone who was specifically rejected
+            .neq("status", "REJECTED");
     }
 
-    // Log action
     const { error: logError } = await supabase.from("action_logs").insert([
         {
             user_id: userId,
@@ -409,25 +316,21 @@ export async function updateStatus(
 
     if (logError) console.error("Error logging action:", logError);
 
-    // 4. Send Email Notification (Non-blocking)
     if (newStatus === "APPROVED") {
         const qrUrl = (uid: string) => `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${uid}`;
-
-        // Always notify the specifically updated user
         sendEmail(
             user.email,
             "Registration Approved! 🎉 - Hackathon 2K26",
             EMAIL_TEMPLATES.PAYMENT_VERIFIED(user.name, qrUrl(user.id), user.reg_no, whatsappLink)
         );
 
-        // If it was a BULK leader, notify all newly approved members
         if (user.role === "LEADER" && user.teams?.payment_mode === "BULK" && user.team_id) {
             const { data: members } = await supabase
                 .from("users")
                 .select("*")
                 .eq("team_id", user.team_id)
                 .neq("id", userId)
-                .eq("status", "APPROVED"); // Only those we just flipped
+                .eq("status", "APPROVED");
 
             if (members) {
                 members.forEach(m => {
@@ -442,7 +345,7 @@ export async function updateStatus(
     } else if (newStatus === "REJECTED") {
         sendEmail(
             user.email,
-            "Action Required: Payment Issue ⚠️",
+            "Action Required: Payment Issue \u26A0\uFE0F",
             EMAIL_TEMPLATES.PAYMENT_REJECTED(user.name)
         );
     }
@@ -455,82 +358,42 @@ export async function approveTeamPayment(
     adminId: string,
     paymentDetails: { transaction_id: string | null; screenshot_url: string | null }
 ) {
-    try {
-        // 1. Fetch all team members to notify them later
-        const { data: members, error: mErr } = await supabase
-            .from("users")
-            .select("*")
-            .eq("team_id", teamId);
+    const { data: team, error: teamErr } = await supabase
+        .from("teams")
+        .update({ status: "APPROVED" })
+        .eq("id", teamId)
+        .select()
+        .single();
 
-        if (mErr) {
-            console.error("ERROR fetching squad members:", mErr);
-            return { error: "Failed to locate squad members for payment verification." };
-        }
-        if (!members || members.length === 0) return { error: "No members found in this squad." };
+    if (teamErr) throw teamErr;
 
-        // 2. Update all members to APPROVED with the provided proof
-        const { error: uErr } = await supabase
-            .from("users")
-            .update({
-                status: "APPROVED",
-                verified_by: adminId,
-                is_present: true // Auto-verify on approval
-            })
-            .eq("team_id", teamId)
-            .neq("status", "REJECTED");
+    const { error: membersErr } = await supabase
+        .from("users")
+        .update({ status: "APPROVED", verified_by: adminId })
+        .eq("team_id", teamId);
 
-        if (uErr) {
-            console.error("ERROR updating member statuses:", uErr);
-            return { error: (uErr as any).message || "Approval failed." };
-        }
+    if (membersErr) throw membersErr;
 
-        // 3. Log the action
-        const referenceUserId = members.find(m => m.role === 'LEADER')?.id || members[0].id;
-        await supabase.from("action_logs").insert([{
-            user_id: referenceUserId,
-            admin_id: adminId,
-            action: "BULK_APPROVE_PAYMENT"
-        }]);
-
-        // 4. Send Emails
-        const qrUrl = (uid: string) => `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${uid}`;
-        const leader = members.find(m => m.role === 'LEADER') || members[0];
-        const waLink = await getActiveGroupLink(leader.college);
-
-        for (const member of members) {
-            if (member.status === "APPROVED") continue;
-            sendEmail(
-                member.email,
-                "Registration Approved! 🎉 - Hackathon 2K26",
-                EMAIL_TEMPLATES.PAYMENT_VERIFIED(member.name, qrUrl(member.id), member.reg_no, waLink || "")
-            );
-        }
-
-        return { data: true };
-    } catch (err: any) {
-        console.error("UNEXPECTED ERROR in approveTeamPayment:", err);
-        return { error: err.message || "An unexpected error occurred during squad payment approval." };
-    }
+    return team;
 }
 
 export async function getActiveGroupLink(college: string) {
-    const normalizedCollege = college === "RGM College" ? "RGM" : "OTHERS";
     const { data, error } = await supabase
-        .from("group_links")
-        .select("whatsapp_link")
-        .eq("college", normalizedCollege)
-        .eq("active", true)
-        .limit(1);
+        .from("whatsapp_links")
+        .select("link")
+        .eq("college", college)
+        .eq("is_active", true)
+        .maybeSingle();
 
-    if (error) throw error;
-    return data[0]?.whatsapp_link || null;
+    if (error) return null;
+    return data?.link;
 }
 
 export async function getActiveEmailAccounts() {
     const { data, error } = await supabase
         .from("email_accounts")
         .select("*")
-        .eq("active", true);
+        .eq("is_active", true);
 
     if (error) throw error;
     return data;
@@ -541,28 +404,31 @@ export async function deleteUser(userId: string) {
         .from("users")
         .delete()
         .eq("id", userId);
-
     if (error) throw error;
     return true;
 }
 
 // --- Squad & Unstop Flow Helpers ---
 
-export async function requestJoinTeam(teamId: string, userId: string) {
+export async function requestJoinTeam(teamId: string, userId: string | null, candidateData?: any) {
     try {
+        const insertData: any = { team_id: teamId, status: 'PENDING' };
+        if (userId) insertData.user_id = userId;
+        if (candidateData) insertData.candidate_data = candidateData;
+
         const { data, error } = await supabase
             .from("join_requests")
-            .insert([{ team_id: teamId, user_id: userId, status: 'PENDING' }])
+            .upsert(insertData, { onConflict: 'team_id,user_id' })
             .select()
             .single();
 
-        if (error) return { error: error.message };
+        if (error) return { error: `DB Error: ${error.message} (Payload: ${JSON.stringify(insertData)})` };
         return { data };
     } catch (err: any) {
         return { error: err.message };
     }
 }
-// 9. Get Join Requests for a Team
+
 export async function getJoinRequests(teamId: string, status: 'PENDING' | 'ACCEPTED' | 'COMPLETED' = 'PENDING') {
     const { data, error } = await supabase
         .from("join_requests")
@@ -571,7 +437,9 @@ export async function getJoinRequests(teamId: string, status: 'PENDING' | 'ACCEP
             users:user_id (
                 name,
                 reg_no,
-                college
+                college,
+                email,
+                phone
             )
         `)
         .eq("team_id", teamId)
@@ -582,14 +450,12 @@ export async function getJoinRequests(teamId: string, status: 'PENDING' | 'ACCEP
         throw error;
     }
 
-    // Ensure we handle both object and array formats (though should be object)
-    // Map to a consistent format the UI expects (req.users.name etc)
     return (data || []).map(req => {
-        const userData = Array.isArray(req.users) ? req.users[0] : req.users;
+        const userData = req.user_id ? (Array.isArray(req.users) ? req.users[0] : req.users) : req.candidate_data;
         return {
             ...req,
-            users: userData, // Original name
-            user: userData   // Alias for robustness
+            users: userData,
+            user: userData
         };
     });
 }
@@ -607,7 +473,6 @@ export async function getUserJoinRequest(userId: string) {
 }
 
 export async function respondToJoinRequest(requestId: string, status: 'ACCEPTED' | 'REJECTED') {
-    // 1. Fetch request details
     const { data: request, error: reqErr } = await supabase
         .from("join_requests")
         .select("*, users!user_id(name, email)")
@@ -617,8 +482,7 @@ export async function respondToJoinRequest(requestId: string, status: 'ACCEPTED'
     if (reqErr) throw reqErr;
 
     if (status === 'ACCEPTED') {
-        // 2. Capacity Check
-        const { data: team } = await supabase.from("teams").select("max_members").eq("id", request.team_id).single();
+        const { data: team } = await supabase.from("teams").select("max_members, leader_id, users!leader_id(status)").eq("id", request.team_id).single();
         const { count } = await supabase.from("users").select("*", { count: 'exact', head: true }).eq("team_id", request.team_id);
 
         const currentMax = team?.max_members || 5;
@@ -626,15 +490,20 @@ export async function respondToJoinRequest(requestId: string, status: 'ACCEPTED'
             throw new Error(`Cannot accept: Squad is already at maximum capacity (${currentMax}).`);
         }
 
-        // 3. Update User
-        const { error: userErr } = await supabase
-            .from("users")
-            .update({ team_id: request.team_id, role: "MEMBER" })
-            .eq("id", request.user_id);
+        if (request.user_id) {
+            // Inherit status if team leader is already paying or approved
+            // But usually Joiners are UNPAID until they see the dashboard.
+            const { error: userErr } = await supabase
+                .from("users")
+                .update({
+                    team_id: request.team_id,
+                    role: "MEMBER"
+                })
+                .eq("id", request.user_id);
 
-        if (userErr) throw userErr;
+            if (userErr) throw userErr;
+        }
 
-        // 4a. Auto-reject others if team is now full
         if (count !== null && count + 1 >= currentMax) {
             await supabase
                 .from("join_requests")
@@ -645,7 +514,6 @@ export async function respondToJoinRequest(requestId: string, status: 'ACCEPTED'
         }
     }
 
-    // 4b. Update Request Status
     const { error: updateErr } = await supabase
         .from("join_requests")
         .update({ status: status })
@@ -653,12 +521,11 @@ export async function respondToJoinRequest(requestId: string, status: 'ACCEPTED'
 
     if (updateErr) throw updateErr;
 
-    // 5. Send Notification Email
     if (request?.users?.email) {
         if (status === 'ACCEPTED') {
             await sendEmail(
                 request.users.email,
-                "Welcome to the Squad! 🚀",
+                "Welcome to the Squad! \uD83D\uDE80",
                 EMAIL_TEMPLATES.CUSTOM(
                     request.users.name,
                     "Congratulations! You have joined the squad.",
@@ -687,108 +554,47 @@ export async function registerBulkMembers(
     members: any[],
     initialStatus: "UNPAID" | "PENDING" = "UNPAID"
 ) {
-    try {
-        // 1. Fetch existing statuses to prevent overwriting APPROVED/PENDING users
-        const emails = members.map(m => m.email);
-        const { data: existingUsers } = await supabase
-            .from("users")
-            .select("email, status")
-            .in("email", emails);
+    const membersToInsert = members.map(m => ({
+        name: m.name,
+        reg_no: m.reg_no.trim().toUpperCase(),
+        email: m.email.trim().toLowerCase(),
+        phone: m.phone,
+        college: m.college === "RGM" ? "RGM College" : (m.otherCollege || m.college),
+        branch: m.branch || "N/A",
+        year: m.year || "I",
+        tshirt_size: m.tshirt_size || "M",
+        team_id: teamId,
+        role: "MEMBER",
+        status: initialStatus
+    }));
 
-        const lockedEmails = new Set(
-            existingUsers?.filter(u => ["APPROVED", "PENDING", "VERIFYING"].includes(u.status)).map(u => u.email) || []
-        );
-
-        // 2. Filter out locked members
-        const membersToInsert = members
-            .filter(m => !lockedEmails.has(m.email))
-            .map(m => ({
-                name: m.name,
-                reg_no: m.reg_no,
-                email: m.email,
-                phone: m.phone,
-                college: m.college || 'RGM College',
-                branch: m.branch,
-                year: m.year,
-                team_id: teamId,
-                role: 'MEMBER',
-                tshirt_size: m.tshirt_size,
-                status: initialStatus
-            }));
-
-        if (membersToInsert.length === 0) return { data: [] };
-
-        const { data, error } = await supabase
-            .from("users")
-            .upsert(membersToInsert, { onConflict: 'email' })
-            .select();
-
-        if (error) {
-            console.error("SUPABASE ERROR in registerBulkMembers:", error);
-            if (error.code === '42703') {
-                return { error: "Database Sync Required: Please run the 'add_tshirt_column.sql' script in your Supabase SQL Editor." };
-            }
-            return { error: error.message || "Bulk registration failed." };
-        }
-        return { data };
-    } catch (err: any) {
-        console.error("UNEXPECTED ERROR in registerBulkMembers:", err);
-        return { error: err.message || "An unexpected error occurred during squad member synchronization." };
-    }
+    const { error } = await supabase.from("users").upsert(membersToInsert, { onConflict: 'email' });
+    if (error) throw error;
+    return true;
 }
 
 // --- Team Management Functions ---
 
 export async function removeMemberFromTeam(userId: string, teamId: string) {
-    const { data: user, error: userErr } = await supabase
-        .from("users")
-        .select("team_id, role")
-        .eq("id", userId)
-        .single();
-
-    if (userErr) throw userErr;
-    if (user.team_id !== teamId) throw new Error("User is not in this team");
-    if (user.role === "LEADER") throw new Error("Team leader cannot be removed");
-
-    const { data: team } = await supabase.from("teams").select("payment_mode").eq("id", teamId).single();
-
-    const updateData: any = { team_id: null, role: "MEMBER" };
-    // If team was BULK, reset the removed user's status to UNPAID to prevent "free-riding"
-    if (team?.payment_mode === 'BULK') {
-        updateData.status = "UNPAID";
-    }
-
     const { error } = await supabase
         .from("users")
-        .update(updateData)
-        .eq("id", userId);
+        .update({ team_id: null, role: "MEMBER" })
+        .eq("id", userId)
+        .eq("team_id", teamId);
 
     if (error) throw error;
     return true;
 }
 
 export async function leaveTeam(userId: string) {
-    const { data: user, error: userErr } = await supabase
-        .from("users")
-        .select("team_id, role")
-        .eq("id", userId)
-        .single();
-
-    if (userErr) throw userErr;
-    if (!user.team_id) throw new Error("You are not in a team");
-    if (user.role === "LEADER") throw new Error("Team leader cannot leave. Delete the team instead.");
-
-    const { data: team } = await supabase.from("teams").select("payment_mode").eq("id", user.team_id).single();
-
-    const updateData: any = { team_id: null, role: "MEMBER" };
-    // If team was BULK, reset user's status to UNPAID to prevent "free-riding"
-    if (team?.payment_mode === 'BULK') {
-        updateData.status = "UNPAID";
+    const { data: user } = await supabase.from("users").select("role, team_id").eq("id", userId).single();
+    if (user?.role === 'LEADER') {
+        throw new Error("Leaders cannot leave. You must delete the squad to disband.");
     }
 
     const { error } = await supabase
         .from("users")
-        .update(updateData)
+        .update({ team_id: null, role: "MEMBER" })
         .eq("id", userId);
 
     if (error) throw error;
@@ -809,12 +615,10 @@ export async function deleteTeam(teamId: string) {
     const { data: team } = await supabase.from("teams").select("payment_mode").eq("id", teamId).single();
 
     const updateData: any = { team_id: null, role: "MEMBER" };
-    // If team was BULK, reset all members' status to UNPAID
     if (team?.payment_mode === 'BULK') {
         updateData.status = "UNPAID";
     }
 
-    // First, remove all members from the team and logically reset their status
     const { error: memberErr } = await supabase
         .from("users")
         .update(updateData)
@@ -822,10 +626,8 @@ export async function deleteTeam(teamId: string) {
 
     if (memberErr) throw memberErr;
 
-    // Delete any pending join requests
     await supabase.from("join_requests").delete().eq("team_id", teamId);
 
-    // Delete the team
     const { error } = await supabase
         .from("teams")
         .delete()
@@ -835,20 +637,9 @@ export async function deleteTeam(teamId: string) {
     return true;
 }
 
-export async function addMemberToTeam(memberData: {
-    reg_no: string,
-    name: string,
-    email: string,
-    phone?: string,
-    college?: string,
-    branch?: string,
-    year?: string,
-    tshirt_size?: string,
-    other_college?: string
-}, teamId: string) {
-    const { reg_no, name, email, phone, college, branch, year, tshirt_size, other_college } = memberData;
+export async function addMemberToTeam(memberData: any, teamId: string) {
+    const { reg_no, name, email, phone, college, branch, year, tshirt_size, otherCollege } = memberData;
 
-    // 1. Check if user already exists
     const { data: existingUser } = await supabase
         .from("users")
         .select("*")
@@ -859,8 +650,7 @@ export async function addMemberToTeam(memberData: {
         throw new Error("This participant is already registered in another squad.");
     }
 
-    // 2. Check team capacity
-    const { data: team } = await supabase.from("teams").select("*, leader:users!fk_team_leader(*)").eq("id", teamId).single();
+    const { data: team } = await supabase.from("teams").select("*, users!leader_id(status)").eq("id", teamId).single();
     const { count } = await supabase.from("users").select("*", { count: 'exact', head: true }).eq("team_id", teamId);
 
     if (count !== null && count >= (team?.max_members || 5)) {
@@ -868,15 +658,7 @@ export async function addMemberToTeam(memberData: {
     }
 
     if (existingUser) {
-        // Double check capacity again for existing user joining (race condition protection)
-        const { count: finalCount } = await supabase.from("users").select("*", { count: 'exact', head: true }).eq("team_id", teamId);
-        if (finalCount !== null && finalCount >= (team?.max_members || 5)) {
-            throw new Error("Oops, looks like you're late! This squad is full now.");
-        }
-
-        // Just link the existing solo user
-        // Anomaly Fix: Only inherit status if payment mode is BULK
-        const targetStatus = team?.payment_mode === "BULK" ? (team?.leader?.status || "PENDING") : "UNPAID";
+        const targetStatus = team?.payment_mode === "BULK" ? (team?.users?.status || "PENDING") : "UNPAID";
 
         const { error: uErr } = await supabase
             .from("users")
@@ -888,35 +670,19 @@ export async function addMemberToTeam(memberData: {
             .eq("id", existingUser.id);
         if (uErr) throw uErr;
 
-        // Auto-reject other pending requests for THIS USER if they just joined (they found a home)
         await supabase.from("join_requests").update({ status: 'COMPLETED' }).eq("user_id", existingUser.id).neq("team_id", teamId);
-
-        // Auto-reject other pending requests for THIS TEAM if it's now full
-        if (finalCount !== null && finalCount + 1 >= (team?.max_members || 5)) {
-            await supabase.from("join_requests").update({ status: 'REJECTED' }).eq("team_id", teamId).eq("status", 'PENDING');
-        }
-
-        // Cleanup any ghost join requests for this team
-        await supabase.from("join_requests").delete().eq("user_id", existingUser.id).eq("team_id", teamId);
 
         return existingUser;
     } else {
-        // 3. Create new user record
-        const finalCollege = (college === 'OTHERS' && other_college) ? other_college : (college || team?.leader?.college);
-        const targetStatus = team?.payment_mode === "BULK" ? (team?.leader?.status || "PENDING") : "UNPAID";
-
-        // Double check capacity again for new user (race condition protection)
-        const { count: finalCount } = await supabase.from("users").select("*", { count: 'exact', head: true }).eq("team_id", teamId);
-        if (finalCount !== null && finalCount >= (team?.max_members || 5)) {
-            throw new Error("Oops, looks like you're late! This squad is full now.");
-        }
+        const finalCollege = (college === 'OTHERS' && otherCollege) ? otherCollege : (college || team?.users?.college);
+        const targetStatus = team?.payment_mode === "BULK" ? (team?.users?.status || "PENDING") : "UNPAID";
 
         const { data: newUser, error: iErr } = await supabase
             .from("users")
             .insert([{
                 reg_no: reg_no.trim().toUpperCase(),
                 name,
-                email,
+                email: email.trim().toLowerCase(),
                 phone,
                 college: finalCollege,
                 branch: branch || "N/A",
@@ -930,10 +696,6 @@ export async function addMemberToTeam(memberData: {
             .single();
 
         if (iErr) throw iErr;
-
-        // Cleanup any ghost join requests
-        await supabase.from("join_requests").delete().eq("user_id", newUser.id).eq("team_id", teamId);
-
         return newUser;
     }
 }
@@ -966,7 +728,6 @@ export async function markAttendance(userId: string, teamId: string, date: strin
 }
 
 export async function fetchAttendanceReport(date: string) {
-    // This fetches all users and their attendance for a specific date
     const { data: users, error: uErr } = await supabase
         .from("users")
         .select("id, name, reg_no, status, team_id, teams!team_id(name, team_number)");
@@ -980,7 +741,6 @@ export async function fetchAttendanceReport(date: string) {
 
     if (aErr) throw aErr;
 
-    // Combine
     return users.map(u => {
         const record = attendance?.find(a => a.user_id === u.id);
         return {
@@ -1002,4 +762,3 @@ export async function sendCustomUserEmail(userId: string, subject: string, messa
     await sendEmail(user.email, subject, EMAIL_TEMPLATES.CUSTOM(user.name, subject, message));
     return true;
 }
-

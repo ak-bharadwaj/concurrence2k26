@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { Loader2, User, Users, CheckCircle, XCircle, Clock, LogOut, Ticket, Crown, MessageSquare, Send, ChevronRight, Copy, ShieldCheck, Plus, Sparkles, Upload } from "lucide-react";
+import { Loader2, User, Users, CheckCircle, XCircle, Clock, LogOut, Ticket, Crown, MessageSquare, Send, ChevronRight, Copy, ShieldCheck, Plus, Sparkles, Upload, Mail, Phone } from "lucide-react";
 import { submitPayment, getNextAvailableQR, getUserJoinRequest, getJoinRequests, respondToJoinRequest } from "@/lib/supabase-actions";
 import { motion, AnimatePresence } from "framer-motion";
 import { getFriendlyError } from "@/lib/error-handler";
@@ -452,24 +452,36 @@ export default function DashboardPage() {
                                                 </div>
                                                 <div className="space-y-3">
                                                     {pendingRequests.map((req: any) => (
-                                                        <div key={req.id} className="flex items-center justify-between p-3 bg-black/40 rounded-2xl border border-white/5">
-                                                            <div>
-                                                                <p className="text-xs font-bold text-white">{req.users?.name || req.name || "Unknown Warrior"}</p>
-                                                                <p className="text-[9px] text-white/40 uppercase font-mono">{req.users?.reg_no || req.reg_no || "---"}</p>
+                                                        <div key={req.id} className="flex flex-col gap-3 p-4 bg-black/40 rounded-3xl border border-white/5">
+                                                            <div className="flex items-start justify-between gap-4">
+                                                                <div>
+                                                                    <p className="text-sm font-black text-white">{req.users?.name || req.name || "Unknown Warrior"}</p>
+                                                                    <p className="text-[10px] text-white/40 uppercase font-mono tracking-tighter">{req.users?.reg_no || req.reg_no || "---"} • {req.users?.college || req.college || "N/A"}</p>
+                                                                </div>
+                                                                <div className="flex gap-2 shrink-0">
+                                                                    <button
+                                                                        onClick={() => handleRespondToRequest(req.id, 'ACCEPTED')}
+                                                                        className="px-4 py-2 bg-cyan-500 text-black text-[10px] font-black uppercase rounded-xl hover:bg-cyan-400 transition-all shadow-[0_0_15px_rgba(6,182,212,0.3)]"
+                                                                    >
+                                                                        Accept
+                                                                    </button>
+                                                                    <button
+                                                                        onClick={() => handleRespondToRequest(req.id, 'REJECTED')}
+                                                                        className="px-4 py-2 bg-red-500/10 text-red-500 text-[10px] font-black uppercase rounded-xl hover:bg-red-500 hover:text-white border border-red-500/20 transition-all"
+                                                                    >
+                                                                        Reject
+                                                                    </button>
+                                                                </div>
                                                             </div>
-                                                            <div className="flex gap-2">
-                                                                <button
-                                                                    onClick={() => handleRespondToRequest(req.id, 'ACCEPTED')}
-                                                                    className="px-3 py-1.5 bg-cyan-500 text-black text-[9px] font-black uppercase rounded-lg hover:bg-cyan-400 transition-all"
-                                                                >
-                                                                    Accept
-                                                                </button>
-                                                                <button
-                                                                    onClick={() => handleRespondToRequest(req.id, 'REJECTED')}
-                                                                    className="px-3 py-1.5 bg-red-500/10 text-red-500 text-[9px] font-black uppercase rounded-lg hover:bg-red-500 hover:text-white border border-red-500/20 transition-all"
-                                                                >
-                                                                    Reject
-                                                                </button>
+                                                            <div className="flex flex-wrap gap-3 pt-3 border-t border-white/5">
+                                                                <div className="flex items-center gap-2 text-[9px] text-white/50 bg-white/5 px-3 py-1.5 rounded-lg border border-white/5">
+                                                                    <Mail className="w-3 h-3 text-cyan-400" />
+                                                                    {req.users?.email || "---"}
+                                                                </div>
+                                                                <div className="flex items-center gap-2 text-[9px] text-white/50 bg-white/5 px-3 py-1.5 rounded-lg border border-white/5">
+                                                                    <Phone className="w-3 h-3 text-cyan-400" />
+                                                                    {req.users?.phone || "---"}
+                                                                </div>
                                                             </div>
                                                         </div>
                                                     ))}

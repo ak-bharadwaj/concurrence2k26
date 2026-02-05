@@ -66,6 +66,7 @@ export default function LoginPage() {
                                 <input
                                     type="email"
                                     required
+                                    suppressHydrationWarning
                                     value={email}
                                     onChange={(e) => setEmail(e.target.value)}
                                     placeholder="john@example.com"
@@ -81,6 +82,7 @@ export default function LoginPage() {
                                 <input
                                     type="text"
                                     required
+                                    suppressHydrationWarning
                                     value={regNo}
                                     onChange={(e) => setRegNo(e.target.value)}
                                     placeholder="22091A..."
@@ -99,6 +101,7 @@ export default function LoginPage() {
                     <button
                         type="submit"
                         disabled={loading}
+                        suppressHydrationWarning
                         className="w-full py-4 bg-white text-black font-bold rounded-xl hover:bg-white/90 transition-colors flex items-center justify-center gap-2"
                     >
                         {loading ? <Loader2 className="animate-spin" /> : "Sign In"} <ArrowRight className="w-4 h-4" />

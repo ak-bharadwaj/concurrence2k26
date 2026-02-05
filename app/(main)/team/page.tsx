@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { getJoinRequests, respondToJoinRequest, removeMemberFromTeam, leaveTeam, updateTeamSettings, addMemberToTeam, updateMemberDetails, deleteTeam, submitPayment, getNextAvailableQR, joinTeam, requestJoinTeam } from "@/lib/supabase-actions";
-import { Loader2, Users, Crown, Copy, Check, UserMinus, LogOut, Settings, ArrowLeft, UserPlus, X, Edit3, Save, Trash2, ShieldCheck, Plus, CreditCard, Upload, Clock, Search } from "lucide-react";
+import { Loader2, Users, Crown, Copy, Check, UserMinus, LogOut, Settings, ArrowLeft, UserPlus, X, Edit3, Save, Trash2, ShieldCheck, Plus, CreditCard, Upload, Clock, Search, Mail, Phone } from "lucide-react";
 import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
 import { getFriendlyError } from "@/lib/error-handler";
@@ -527,26 +527,38 @@ export default function TeamPage() {
 
                             <div className="max-h-[250px] overflow-y-auto scrollbar-hide space-y-3">
                                 {joinRequests.map((req: any) => (
-                                    <div key={req.id} className="flex items-center justify-between p-4 bg-white/5 rounded-xl border border-white/10">
-                                        <div>
-                                            <p className="font-bold text-sm">{req.users?.name || "Unknown Warrior"}</p>
-                                            <p className="text-[10px] text-white/40 uppercase font-mono">{req.users?.reg_no || "---"}</p>
+                                    <div key={req.id} className="flex flex-col gap-3 p-4 bg-white/5 rounded-2xl border border-white/10">
+                                        <div className="flex items-start justify-between gap-4">
+                                            <div>
+                                                <p className="font-bold text-sm">{req.users?.name || "Unknown Warrior"}</p>
+                                                <p className="text-[10px] text-white/40 uppercase font-mono tracking-tighter">{req.users?.reg_no || "---"} • {req.users?.college || "N/A"}</p>
+                                            </div>
+                                            <div className="flex gap-2">
+                                                <button
+                                                    onClick={() => handleJoinRequest(req.id, 'ACCEPTED')}
+                                                    disabled={processingId === req.id}
+                                                    className="p-2 bg-green-500/10 text-green-500 rounded-lg hover:bg-green-500 hover:text-white transition-all disabled:opacity-50"
+                                                >
+                                                    <Check className="w-4 h-4" />
+                                                </button>
+                                                <button
+                                                    onClick={() => handleJoinRequest(req.id, 'REJECTED')}
+                                                    disabled={processingId === req.id}
+                                                    className="p-2 bg-red-500/10 text-red-500 rounded-lg hover:bg-red-500 hover:text-white transition-all disabled:opacity-50"
+                                                >
+                                                    <X className="w-4 h-4" />
+                                                </button>
+                                            </div>
                                         </div>
-                                        <div className="flex gap-2">
-                                            <button
-                                                onClick={() => handleJoinRequest(req.id, 'ACCEPTED')}
-                                                disabled={processingId === req.id}
-                                                className="p-2 bg-green-500/10 text-green-500 rounded-lg hover:bg-green-500 hover:text-white transition-all disabled:opacity-50"
-                                            >
-                                                <Check className="w-4 h-4" />
-                                            </button>
-                                            <button
-                                                onClick={() => handleJoinRequest(req.id, 'REJECTED')}
-                                                disabled={processingId === req.id}
-                                                className="p-2 bg-red-500/10 text-red-500 rounded-lg hover:bg-red-500 hover:text-white transition-all disabled:opacity-50"
-                                            >
-                                                <X className="w-4 h-4" />
-                                            </button>
+                                        <div className="flex flex-wrap gap-2 pt-2 border-t border-white/5">
+                                            <div className="flex items-center gap-1.5 text-[9px] text-white/40 bg-black/20 px-2 py-1 rounded-md border border-white/5">
+                                                <Mail className="w-3 h-3 text-cyan-400" />
+                                                {req.users?.email || "---"}
+                                            </div>
+                                            <div className="flex items-center gap-1.5 text-[9px] text-white/40 bg-black/20 px-2 py-1 rounded-md border border-white/5">
+                                                <Phone className="w-3 h-3 text-cyan-400" />
+                                                {req.users?.phone || "---"}
+                                            </div>
                                         </div>
                                     </div>
                                 ))}

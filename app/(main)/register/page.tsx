@@ -51,7 +51,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import { getFriendlyError } from "@/lib/error-handler";
 
-type Step = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+type Step = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
 const GlassNavbar = () => (
     <nav className="fixed top-0 left-0 right-0 z-50 px-4 py-4">
@@ -104,12 +104,20 @@ function RegisterPageContent() {
     const [searchedTeam, setSearchedTeam] = useState<any>(null);
     const [acceptedTerms, setAcceptedTerms] = useState(false);
     const [joinRequestSent, setJoinRequestSent] = useState(false);
-    const [joinRequestStatus, setJoinRequestStatus] = useState<'PENDING' | 'ACCEPTED' | 'REJECTED' | 'COMPLETED'>('PENDING');
+    const [joinRequestStatus, setJoinRequestStatus] = useState<'NONE' | 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'COMPLETED'>('NONE');
 
     // Payment Info
     const [assignedQR, setAssignedQR] = useState<any>(null);
     const [finalAmount, setFinalAmount] = useState<number | null>(null);
     const [paymentProof, setPaymentProof] = useState({ transaction_id: "", screenshot: null as File | null });
+
+    async function loadPaymentInfo(fixedAmount?: number) {
+        try {
+            setLoading(true);
+            const qr = await getNextAvailableQR(fixedAmount || totalAmount);
+            setAssignedQR(qr);
+        } catch (e) { } finally { setLoading(false); }
+    }
 
     // --- Price Calculation ---
     const totalAmount = regMode === "SOLO" ? 800 : (
@@ -140,7 +148,6 @@ function RegisterPageContent() {
                     router.push("/success");
                 } else if (payload.new.status === 'REJECTED') {
                     setError("Payment rejected. Please check your transaction ID.");
-                    if (step > 4) setStep(5); // Bring them back to review if they were at payment
                 }
             })
             .subscribe();
@@ -166,29 +173,32 @@ function RegisterPageContent() {
             userSub.unsubscribe();
             teamSub.unsubscribe();
         };
-    }, [userId, teamDetails, router]);
+    }, [userId, regMode]); // Removed step, teamDetails, router to prevent redundant subs
 
-    // 3. Joiner: Listen for Join Request Status Changes
+    // 3. SPECIAL LISTENER FOR ANONYMOUS JOINERS
     useEffect(() => {
-        if (!userId || regMode !== 'SQUAD' || squadSubMode !== 'JOIN') return;
+        if (regMode !== 'SQUAD' || squadSubMode !== 'JOIN' || !searchedTeam?.id || userId) return;
 
         const requestSub = supabase
-            .channel(`join_request_status_${userId}`)
+            .channel('anonymous_join_sync')
             .on('postgres_changes', {
                 event: 'UPDATE',
                 schema: 'public',
                 table: 'join_requests',
-                filter: `user_id=eq.${userId}`
+                filter: `team_id=eq.${searchedTeam.id}`
             }, (payload) => {
-                setJoinRequestStatus(payload.new.status);
-                if (payload.new.status === 'REJECTED') {
-                    setError("Your join request was declined by the squad captain.");
+                const isMatch = payload.new.candidate_data?.email === formData.email;
+                if (isMatch) {
+                    setJoinRequestStatus(payload.new.status);
+                    if (payload.new.status === 'ACCEPTED') {
+                        setStep(5);
+                    }
                 }
             })
             .subscribe();
 
         return () => { requestSub.unsubscribe(); };
-    }, [userId, regMode, squadSubMode]);
+    }, [regMode, squadSubMode, searchedTeam?.id, userId, formData.email]);
 
     // Leader: Listen for Team Member Updates (Real-time Squad Sync)
     useEffect(() => {
@@ -232,7 +242,7 @@ function RegisterPageContent() {
             .subscribe();
 
         return () => { requestSub.unsubscribe(); };
-    }, [teamDetails?.id, regMode, squadSubMode]);
+    }, [teamDetails?.id, regMode, squadSubMode]); // Optimized deps
 
     const handleRespondToRequest = async (requestId: string, status: 'ACCEPTED' | 'REJECTED') => {
         try {
@@ -256,47 +266,41 @@ function RegisterPageContent() {
             };
 
             if (regMode === "SQUAD") {
-                // Logic split inside submodes now
-                // --- SQUAD POST-REGISTRATION LOGIC ---
                 if (squadSubMode === "FORM") {
-                    // DEFERRED SQUAD CREATION:
-                    // Validate availability first
+                    // STRICT ZERO-LEAK: Just validate availability
                     const { error: availErr } = await checkUserAvailability(userParams.email, userParams.phone);
                     if (availErr) {
                         setError(getFriendlyError(availErr));
                         return;
                     }
-
-                    // Initialize Virtual Team State for UI
                     setTeamDetails({
-                        name: "Pending...",
+                        name: teamName || "Pending...",
                         unique_code: "---",
-                        members: [] // Leader will be added virtually in UI or logic?
+                        members: []
                     });
-
-                    // Don't create anything in DB yet. Move to Name setup.
-                    setStep(2);
+                    setStep(4);
                 } else if (squadSubMode === "JOIN") {
-                    // JOINERS: DEFER REGISTRATION
-                    // We check availability first, but don't write to DB yet.
-                    const { error: availErr } = await checkUserAvailability(userParams.email, userParams.phone);
-                    if (availErr) {
-                        setError(getFriendlyError(availErr));
+                    // JOINERS: IMMEDIATE REGISTRATION (UNPAID) for coordination
+                    const { data: user, error: regErr } = await registerUser({
+                        ...userParams,
+                        status: "UNPAID"
+                    });
+                    if (regErr || !user) {
+                        setError(getFriendlyError(regErr || "Registration failed"));
                         return;
                     }
-
-                    // Move to Step 4 to show the team they want to join
-                    setStep(4);
+                    setUserId(user.id);
+                    // AUTO-TRIGGER JOIN REQUEST
+                    const success = await handleJoinRequest(user.id);
+                    if (success) setStep(4);
                 }
             } else {
-                // SOLO MODE: DEFER REGISTRATION
+                // SOLO MODE: STRICT ZERO-LEAK
                 const { error: availErr } = await checkUserAvailability(userParams.email, userParams.phone);
-
                 if (availErr) {
                     setError(getFriendlyError(availErr));
                     return;
                 }
-
                 setStep(2); // Move to Solo Protocol (Consent)
             }
         } catch (err: any) {
@@ -381,29 +385,22 @@ function RegisterPageContent() {
 
 
 
-    const handleJoinRequest = async () => {
+    const handleJoinRequest = async (overrideId?: string) => {
         try {
+            if (!searchedTeam?.id) throw new Error("No squad selected. Please go back and find a squad.");
             setLoading(true);
-
-            const userParams = {
-                ...formData,
-                tshirt_size: formData.tshirtSize,
-                college: formData.college === "RGM" ? "RGM College" : formData.otherCollege,
-                role: "MEMBER",
-                status: "JOIN_PENDING" as const // Distinguish from regular participants
-            };
-
-            const { data: user, error: regErr } = await registerUser(userParams);
-            if (regErr || !user) throw new Error(regErr?.message || "Joiner registration failed");
-
-            setUserId(user.id);
-            setUserRole("MEMBER");
-
-            const { error: joinErr } = await requestJoinTeam(searchedTeam.id, user.id);
-            if (joinErr) throw joinErr;
+            const { error: joinErr } = await requestJoinTeam(searchedTeam.id, overrideId || userId, null);
+            if (joinErr) throw new Error(joinErr);
 
             setJoinRequestSent(true);
-        } catch (err: any) { setError(getFriendlyError(err)); } finally { setLoading(false); }
+            setJoinRequestStatus('PENDING');
+            return true;
+        } catch (err: any) {
+            setError(getFriendlyError(err));
+            return false;
+        } finally {
+            setLoading(false);
+        }
     };
 
     const handleBack = () => {
@@ -419,6 +416,7 @@ function RegisterPageContent() {
             else setStep(4); // FORMER leader might want to add/remove members in Hub
         }
         else if (step === 6) setStep(5);
+        // Step 7 is success, cannot go back.
     };
 
     const handlePaymentSubmit = async () => {
@@ -495,7 +493,35 @@ function RegisterPageContent() {
                 }
             }
 
-            // If user ALREADY existed (handle the cases where they were registered earlier but paying now)
+            // LAZY REGISTRATION FOR JOINERS (Accepted Candidates)
+            if (!finalUserId && regMode === "SQUAD" && squadSubMode === "JOIN" && joinRequestStatus === "ACCEPTED") {
+                const userParams = {
+                    ...formData,
+                    tshirt_size: formData.tshirtSize,
+                    college: formData.college === "RGM" ? "RGM College" : formData.otherCollege,
+                    role: "MEMBER",
+                    status: "PENDING" as const,
+                    team_id: searchedTeam.id, // Successfully joined
+                    transaction_id: paymentProof.transaction_id,
+                    screenshot_url: publicUrl,
+                    assigned_qr_id: assignedQR?.id
+                };
+
+                const { data: newUser, error: regErr } = await registerUser(userParams);
+                if (regErr) throw new Error(regErr.message || "Registration failed");
+                if (!newUser) throw new Error("Registration failed.");
+
+                finalUserId = newUser.id;
+                createdUserId = newUser.id;
+
+                // Update request to COMPLETED
+                const { data: req } = await supabase.from("join_requests").select("id").eq("team_id", searchedTeam.id).eq("candidate_data->>email", formData.email).eq("status", "ACCEPTED").maybeSingle();
+                if (req) {
+                    await supabase.from("join_requests").update({ status: 'COMPLETED', user_id: newUser.id }).eq("id", req.id);
+                }
+            }
+
+            // If user ALREADY existed
             if (finalUserId && !createdUserId) {
                 const { error: payErr } = await submitPayment(finalUserId!, {
                     transaction_id: paymentProof.transaction_id,
@@ -505,9 +531,12 @@ function RegisterPageContent() {
                 if (payErr) throw new Error(payErr.message || "Payment submission failed");
             }
 
-            // Success!
-            document.cookie = `student_session=${userId}; path=/; max-age=${60 * 60 * 24 * 30}`; // 30 days
-            router.push("/dashboard");
+            // Success Sequence
+            // [ACK & AUTO-LOGIN]
+            if (finalUserId) {
+                document.cookie = `student_session=${finalUserId}; path=/; max-age=${60 * 60 * 24 * 30}`; // 30 days
+            }
+            setStep(7); // Move to Success Acknowledgment
 
         } catch (err: any) {
             console.error("Registration/Payment Error:", err);
@@ -543,7 +572,7 @@ function RegisterPageContent() {
                         </button>
                     )}
                     <div className="flex gap-2 flex-1">
-                        {[0, 1, 2, 3, 4, 5, 6].map((s) => (
+                        {[0, 1, 2, 3, 4, 5, 6, 7].map((s) => (
                             <div key={s} className={`h-1 flex-1 rounded-full transition-all duration-500 ${step >= s ? 'bg-cyan-500 shadow-[0_0_10px_rgba(6,182,212,0.5)]' : 'bg-white/10'}`} />
                         ))}
                     </div>
@@ -660,7 +689,7 @@ function RegisterPageContent() {
                                 <div className="space-y-6">
                                     {squadSubMode === "FORM" ? (
                                         <div className="space-y-6">
-                                            <Header title="Squad Hub" subtitle="Name your legion" />
+                                            <Header title="Identity Setup" subtitle="Name your legion" />
                                             <FormInput label="Squad Name" icon={Users} value={teamName} onChange={setTeamName} placeholder="The Avengers" />
                                             <button onClick={handleTeamNameProceed} className="w-full py-4 bg-cyan-500 text-black font-bold rounded-xl active:scale-95 transition-all">ESTABLISH TEAM IDENTITY</button>
                                         </div>
@@ -741,7 +770,7 @@ function RegisterPageContent() {
                         <motion.div key="s4" className="space-y-6 px-1">
                             {regMode === 'SQUAD' && squadSubMode === 'FORM' && !teamDetails ? (
                                 <div className="glass-card p-6 sm:p-8 rounded-3xl space-y-6">
-                                    <Header title="Squad Hub" subtitle="Name your legion" />
+                                    <Header title="Team Syncing" subtitle="Finalizing metadata" />
                                     <div className="flex flex-col items-center gap-4 py-8">
                                         <Loader2 className="w-12 h-12 text-cyan-500 animate-spin" />
                                         <p className="text-[10px] uppercase font-black tracking-widest text-white/40">Finalizing Team Creation...</p>
@@ -749,6 +778,7 @@ function RegisterPageContent() {
                                 </div>
                             ) : (
                                 <div className="glass-card p-6 rounded-3xl space-y-6">
+                                    <Header title="Legion Hub" subtitle="Command and Control" />
                                     <div className="flex justify-between items-start border-b border-white/5 pb-6">
                                         <div>
                                             <h2 className="text-xl font-black">{teamDetails?.name || "Initializing..."}</h2>
@@ -907,6 +937,35 @@ function RegisterPageContent() {
                     {step === 6 && (
                         <motion.div key="s6" className="glass-card p-6 sm:p-8 rounded-3xl space-y-8">
                             <Header title="Secure Payment" subtitle="Synchronize transmission" />
+
+                            <div className="flex flex-col items-center gap-6">
+                                <p className="text-[10px] text-cyan-400 font-black uppercase tracking-[0.2em] text-center bg-cyan-500/10 py-2 px-4 rounded-full border border-cyan-500/20">
+                                    Long press the QR code below to save it to your phone
+                                </p>
+
+                                <div className="relative p-4 bg-white rounded-[2.5rem] shadow-2xl group transition-all duration-500 hover:scale-105 active:scale-95">
+                                    {assignedQR?.qr_url ? (
+                                        <Image src={assignedQR.qr_url} alt="Payment QR" width={280} height={280} className="rounded-3xl" />
+                                    ) : (
+                                        <div className="w-[280px] h-[280px] bg-neutral-200 rounded-3xl flex items-center justify-center">
+                                            <Loader2 className="w-10 h-10 text-cyan-500 animate-spin" />
+                                        </div>
+                                    )}
+                                </div>
+
+                                <a
+                                    href={assignedQR?.qr_url}
+                                    download="Hackathon_Payment_QR.png"
+                                    className="px-8 py-3 bg-white/5 border border-white/10 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-white/10 transition-all flex items-center gap-2"
+                                >
+                                    <Download className="w-4 h-4 text-cyan-500" /> Save QR TO MOBILE
+                                </a>
+
+                                <div className="text-center space-y-2">
+                                    <p className="text-sm font-black text-white/40 uppercase tracking-widest">Amount to Pay</p>
+                                    <p className="text-4xl font-black text-white tracking-tighter">₹{finalAmount}</p>
+                                </div>
+                            </div>
                             <div className="text-center bg-black/40 p-6 rounded-2xl border border-white/10 relative overflow-hidden min-h-[300px] flex flex-col items-center justify-center">
                                 {loading || !assignedQR ? (
                                     <div className="flex flex-col items-center gap-4 py-12">
@@ -973,15 +1032,22 @@ function RegisterPageContent() {
 
                             <button
                                 onClick={handlePaymentSubmit}
-                                disabled={loading || !paymentProof.transaction_id || !paymentProof.screenshot || !acceptedTerms}
-                                className="w-full py-4 bg-gradient-to-r from-cyan-600 to-purple-600 rounded-xl font-black text-sm tracking-widest uppercase shadow-xl active:scale-95 transition-all flex items-center justify-center gap-3 disabled:opacity-50 disabled:grayscale disabled:cursor-not-allowed"
+                                disabled={loading}
+                                className="w-full py-4 bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-black rounded-2xl active:scale-95 transition-all shadow-xl flex items-center justify-center gap-3 disabled:opacity-50"
                             >
-                                {loading ? <Loader2 className="animate-spin" /> : <>Complete Sync <ArrowRight className="w-5 h-5" /></>}
+                                {loading ? <Loader2 className="animate-spin" /> : <><CheckCircle2 className="w-5 h-5" /> SUBMIT TRANSMISSION</>}
                             </button>
                         </motion.div>
                     )}
-                </AnimatePresence>
-            </div>
+
+                    {/* STEP 7: SUCCESS ACKNOWLEDGMENT */}
+                    {
+                        step === 7 && (
+                            <SuccessView onProceed={() => router.push("/dashboard")} />
+                        )
+                    }
+                </AnimatePresence >
+            </div >
 
             <AnimatePresence>
                 {showAddMemberModal && (
@@ -1023,14 +1089,6 @@ function RegisterPageContent() {
             </AnimatePresence>
         </div >
     );
-
-    async function loadPaymentInfo(fixedAmount?: number) {
-        try {
-            setLoading(true);
-            const qr = await getNextAvailableQR(fixedAmount || totalAmount);
-            setAssignedQR(qr);
-        } catch (e) { } finally { setLoading(false); }
-    }
 }
 
 export default function RegisterPage() {
@@ -1114,6 +1172,67 @@ function ReviewRow({ label, value }: { label: string, value: string }) {
             <span className="text-white/30 uppercase font-black tracking-widest text-[9px]">{label}</span>
             <span className="font-bold text-white/80">{value || "---"}</span>
         </div>
+    );
+}
+
+function SuccessView({ onProceed }: { onProceed: () => void }) {
+    const [timer, setTimer] = React.useState(3);
+
+    React.useEffect(() => {
+        if (timer === 0) {
+            onProceed();
+        }
+    }, [timer, onProceed]);
+
+    React.useEffect(() => {
+        const interval = setInterval(() => {
+            setTimer((prev) => (prev > 0 ? prev - 1 : 0));
+        }, 1000);
+        return () => clearInterval(interval);
+    }, []);
+
+    return (
+        <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="glass-card p-10 rounded-[3rem] text-center space-y-8 relative overflow-hidden"
+        >
+            <div className="absolute inset-0 bg-gradient-to-b from-cyan-500/10 to-transparent pointer-events-none" />
+
+            <div className="relative">
+                <div className="w-24 h-24 bg-cyan-500 rounded-full mx-auto flex items-center justify-center shadow-[0_0_50px_rgba(6,182,212,0.4)]">
+                    <CheckCircle2 className="w-12 h-12 text-black" />
+                </div>
+                <motion.div
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    transition={{ delay: 0.2, type: 'spring' }}
+                    className="absolute -top-2 -right-2 w-8 h-8 bg-white rounded-full flex items-center justify-center text-cyan-600 font-black text-xs shadow-xl"
+                >
+                    {timer}s
+                </motion.div>
+            </div>
+
+            <div className="space-y-3">
+                <h2 className="text-3xl font-black text-white italic tracking-tighter uppercase">Transmission Success</h2>
+                <p className="text-sm text-white/50 max-w-xs mx-auto leading-relaxed">
+                    Your registration and payment have been synchronized. The Sentinels will verify your details within 2-4 hours.
+                </p>
+            </div>
+
+            <div className="pt-4">
+                <button
+                    onClick={onProceed}
+                    className="w-full py-4 bg-white text-black font-black rounded-2xl uppercase text-xs tracking-[0.2em] hover:bg-cyan-400 transition-all active:scale-95 shadow-2xl"
+                >
+                    Proceed to Dashboard
+                </button>
+            </div>
+
+            <p className="text-[10px] font-black uppercase tracking-widest text-cyan-500 animate-pulse">
+                Auto-redirecting in progress...
+            </p>
+        </motion.div>
     );
 }
 
