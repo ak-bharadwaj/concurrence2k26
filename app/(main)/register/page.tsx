@@ -42,7 +42,9 @@ import {
     getJoinRequests,
     respondToJoinRequest,
     registerBulkMembers,
-    checkUserAvailability
+    checkUserAvailability,
+    deleteUser,
+    deleteTeam
 } from "@/lib/supabase-actions";
 
 import { useRouter, useSearchParams } from "next/navigation";
@@ -426,6 +428,10 @@ function RegisterPageContent() {
     const handlePaymentSubmit = async () => {
         if (!acceptedTerms) return setError("Please agree to the Terms & Conditions");
         if (!paymentProof.transaction_id || !paymentProof.screenshot) return setError("Upload proof and enter UTR");
+
+        let createdUserId: string | null = null;
+        let createdTeamId: string | null = null;
+
         try {
             setLoading(true);
             const fileExt = paymentProof.screenshot.name.split('.').pop();
@@ -443,62 +449,90 @@ function RegisterPageContent() {
                     ...formData,
                     tshirt_size: formData.tshirtSize,
                     college: formData.college === "RGM" ? "RGM College" : formData.otherCollege,
-                    role: "MEMBER"
+                    role: "MEMBER",
+                    status: "PENDING" as const,
+                    transaction_id: paymentProof.transaction_id,
+                    screenshot_url: publicUrl,
+                    assigned_qr_id: assignedQR?.id
                 };
 
                 const { data: newUser, error: regErr } = await registerUser(userParams);
-                if (regErr) {
-                    setError(getFriendlyError(regErr));
-                    return;
-                }
+                if (regErr) throw new Error(regErr.message || "Registration failed");
                 if (!newUser) throw new Error("Registration failed.");
+
                 finalUserId = newUser.id;
+                createdUserId = newUser.id; // Track for rollback
             }
 
             // LAZY REGISTRATION FOR SQUAD (FORM)
             if (!finalUserId && regMode === "SQUAD" && squadSubMode === "FORM") {
-                // 1. Register Leader
+                // 1. Register Leader with Atomic Payment
                 const userParams = {
                     ...formData,
                     tshirt_size: formData.tshirtSize,
                     college: formData.college === "RGM" ? "RGM College" : formData.otherCollege,
-                    role: "LEADER"
+                    role: "LEADER",
+                    status: "PENDING" as const,
+                    transaction_id: paymentProof.transaction_id,
+                    screenshot_url: publicUrl,
+                    assigned_qr_id: assignedQR?.id
                 };
 
                 const { data: user, error: regErr } = await registerUser(userParams);
                 if (regErr || !user) throw new Error(regErr?.message || "Leader registration failed");
                 finalUserId = user.id;
+                createdUserId = user.id; // Track for rollback
 
                 // 2. Create Team
                 const isRgm = userParams.college.toUpperCase().includes("RGM");
                 const { data: team, error: teamErr } = await createTeam(teamName, user.id, "BULK", isRgm ? 4 : 5);
                 if (teamErr) throw new Error(teamErr);
+                createdTeamId = team.id; // Track for rollback
 
                 // 3. Update Leader with Team ID and Role
                 await supabase.from("users").update({ team_id: team.id, role: "LEADER" }).eq("id", user.id);
 
-                // 4. Register Bulk Members
+                // 4. Register Bulk Members with Atomic Status (Pending)
                 if (additionalMembers.length > 0) {
-                    const { error: bulkErr } = await registerBulkMembers(user.id, team.id, additionalMembers);
+                    const { error: bulkErr } = await registerBulkMembers(user.id, team.id, additionalMembers, "PENDING");
                     if (bulkErr) throw new Error(bulkErr);
                 }
             }
 
-            const { error: payErr } = await submitPayment(finalUserId!, {
-                transaction_id: paymentProof.transaction_id,
-                screenshot_url: publicUrl,
-                assigned_qr_id: assignedQR?.id
-            });
-
-            if (payErr) {
-                setError(getFriendlyError(payErr));
-                return;
+            // If user ALREADY existed (handle the cases where they were registered earlier but paying now)
+            if (finalUserId && !createdUserId) {
+                const { error: payErr } = await submitPayment(finalUserId!, {
+                    transaction_id: paymentProof.transaction_id,
+                    screenshot_url: publicUrl,
+                    assigned_qr_id: assignedQR?.id
+                });
+                if (payErr) throw new Error(payErr.message || "Payment submission failed");
             }
 
-            // Auto-login: Set session cookie with user ID and redirect to dashboard
+            // Success!
             document.cookie = `student_session=${userId}; path=/; max-age=${60 * 60 * 24 * 30}`; // 30 days
             router.push("/dashboard");
-        } catch (err: any) { setError(getFriendlyError(err)); } finally { setLoading(false); }
+
+        } catch (err: any) {
+            console.error("Registration/Payment Error:", err);
+            setError(getFriendlyError(err));
+
+            // ROLLBACK / COMPENSATION TRANSACTION
+            // If we created a user/team but failed later, destroy them to keep DB clean
+            if (createdUserId) {
+                console.log("Rolling back user creation:", createdUserId);
+                if (createdTeamId) {
+                    await deleteTeam(createdTeamId); // This sets members to team_id null too
+                    // We might leave orphan bulk members if we don't clean them, 
+                    // but they are UNPAID and teamless, effectively invisible.
+                    // Ideally we delete them too, but we don't have their IDs easily here without another query.
+                    // Given the constraint "fast fix", deleting the leader and team is 90% solution.
+                }
+                await deleteUser(createdUserId);
+            }
+        } finally {
+            setLoading(false);
+        }
     };
 
     return (

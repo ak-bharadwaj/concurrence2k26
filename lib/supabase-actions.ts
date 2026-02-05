@@ -158,9 +158,13 @@ export async function registerUser(userData: {
     branch: string;
     year: string;
     team_id?: string;
-    today_date?: string; // dummy for compatibility
+    today_date?: string;
     tshirt_size?: string;
     role?: string;
+    status?: "UNPAID" | "PENDING" | "APPROVED" | "REJECTED" | "VERIFYING";
+    transaction_id?: string;
+    screenshot_url?: string;
+    assigned_qr_id?: string;
 }) {
     try {
         // 1. Check for existing record by Email (our new unique anchor)
@@ -204,10 +208,10 @@ export async function registerUser(userData: {
             team_id: userData.team_id,
             role: userData.role || 'MEMBER',
             tshirt_size: userData.tshirt_size,
-            status: "UNPAID",
-            transaction_id: null,
-            screenshot_url: null,
-            assigned_qr_id: null
+            status: userData.status || "UNPAID",
+            transaction_id: userData.transaction_id || null,
+            screenshot_url: userData.screenshot_url || null,
+            assigned_qr_id: userData.assigned_qr_id || null
         };
 
         const { data, error } = await supabase
@@ -655,7 +659,12 @@ export async function respondToJoinRequest(requestId: string, status: 'ACCEPTED'
     return true;
 }
 
-export async function registerBulkMembers(leaderId: string, teamId: string, members: any[]) {
+export async function registerBulkMembers(
+    leaderId: string,
+    teamId: string,
+    members: any[],
+    initialStatus: "UNPAID" | "PENDING" = "UNPAID"
+) {
     try {
         // 1. Fetch existing statuses to prevent overwriting APPROVED/PENDING users
         const emails = members.map(m => m.email);
@@ -682,7 +691,7 @@ export async function registerBulkMembers(leaderId: string, teamId: string, memb
                 team_id: teamId,
                 role: 'MEMBER',
                 tshirt_size: m.tshirt_size,
-                status: 'UNPAID'
+                status: initialStatus
             }));
 
         if (membersToInsert.length === 0) return { data: [] };

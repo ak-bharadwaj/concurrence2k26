@@ -174,8 +174,7 @@ export const EMAIL_TEMPLATES = {
 
                 <div style="background: linear-gradient(to right, #eff6ff, #dbeafe); border: 1px solid #3b82f6; padding: 20px; border-radius: 12px; margin: 25px 0;">
                     <p style="margin: 0 0 10px 0; font-weight: 600; color: #1e40af;">Need Help? Contact Support:</p>
-                    <p style="margin: 5px 0; font-size: 14px; color: #1e3a8a;">📧 Email: <a href="mailto:support@hackathon2k26.com" style="color: #2563eb; text-decoration: none; font-weight: 600;">support@hackathon2k26.com</a></p>
-                    <p style="margin: 5px 0; font-size: 14px; color: #1e3a8a;">📞 Phone: <strong>+91-XXXXXXXXXX</strong></p>
+                    <p style="margin: 5px 0; font-size: 14px; color: #1e3a8a;">📧 Email: <a href="mailto:dornipaduakshith@gmail.com" style="color: #2563eb; text-decoration: none; font-weight: 600;">dornipaduakshith1@gmail.com</a></p>
                     <p style="margin: 10px 0 0 0; font-size: 13px; color: #475569;">Our support team is available to assist you with any questions or concerns.</p>
                 </div>
 
