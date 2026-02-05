@@ -132,7 +132,7 @@ export async function getTeamDetails(teamId: string) {
 
     const { data: members, error: mErr } = await supabase
         .from("users")
-        .select("name, status")
+        .select("name, status, role")
         .eq("team_id", teamId);
 
     if (mErr) throw mErr;
