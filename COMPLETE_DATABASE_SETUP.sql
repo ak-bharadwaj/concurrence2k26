@@ -160,13 +160,9 @@ GRANT ALL ON public.join_requests TO anon, authenticated, service_role;
 -- SECTION 4: REALTIME SUBSCRIPTIONS (For live updates in frontend)
 -- ============================================================================
 
--- Enable realtime for all tables
-ALTER PUBLICATION supabase_realtime ADD TABLE IF NOT EXISTS public.teams;
-ALTER PUBLICATION supabase_realtime ADD TABLE IF NOT EXISTS public.users;
-ALTER PUBLICATION supabase_realtime ADD TABLE IF NOT EXISTS public.join_requests;
-ALTER PUBLICATION supabase_realtime ADD TABLE IF NOT EXISTS public.support_tickets;
-ALTER PUBLICATION supabase_realtime ADD TABLE IF NOT EXISTS public.qr_codes;
-ALTER PUBLICATION supabase_realtime ADD TABLE IF NOT EXISTS public.action_logs;
+-- Realtime is already enabled for all tables in Supabase
+-- (Publication is set to FOR ALL TABLES by default)
+-- No action needed here
 
 -- Set replica identity for realtime (required for UPDATE/DELETE events)
 ALTER TABLE public.teams REPLICA IDENTITY FULL;

@@ -25,10 +25,9 @@ ALTER TABLE public.join_requests DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.users DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.teams DISABLE ROW LEVEL SECURITY;
 
--- 5. Enable realtime for all tables
-ALTER PUBLICATION supabase_realtime ADD TABLE IF NOT EXISTS join_requests;
-ALTER PUBLICATION supabase_realtime ADD TABLE IF NOT EXISTS users;
-ALTER PUBLICATION supabase_realtime ADD TABLE IF NOT EXISTS teams;
+-- 5. Realtime is already enabled for all tables in Supabase
+-- (Publication is set to FOR ALL TABLES by default)
+-- No action needed here
 
 -- 6. Set replica identity for realtime
 ALTER TABLE public.join_requests REPLICA IDENTITY FULL;
