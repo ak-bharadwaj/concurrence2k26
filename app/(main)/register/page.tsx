@@ -251,7 +251,18 @@ function RegisterPageContent() {
                 role: (regMode === "SQUAD" && squadSubMode === "FORM") ? "LEADER" : "MEMBER"
             };
 
-            const user = await registerUser(userParams);
+            const { data: user, error: regErr } = await registerUser(userParams);
+
+            if (regErr) {
+                setError(getFriendlyError(regErr));
+                return;
+            }
+
+            if (!user) {
+                setError("System failed to finalize identity synchronization. Please try again.");
+                return;
+            }
+
             setUserId(user.id);
             setUserRole(user.role);
 
@@ -262,13 +273,23 @@ function RegisterPageContent() {
                 if (squadSubMode === "FORM") {
                     // Create Team and Link (RGM Units limited to 4 members to allow 5th by Admin)
                     const isRgm = userParams.college.toUpperCase().includes("RGM");
-                    const team = await createTeam(teamName, user.id, "BULK", isRgm ? 4 : 5);
+                    const { data: team, error: teamErr } = await createTeam(teamName, user.id, "BULK", isRgm ? 4 : 5);
+
+                    if (teamErr) {
+                        setError(getFriendlyError(teamErr));
+                        return;
+                    }
+
                     await supabase.from("users").update({ team_id: team.id, role: "LEADER" }).eq("id", user.id);
                     setTeamDetails(team);
                     setStep(4); // Move to Squad Hub
                 } else if (squadSubMode === "JOIN") {
                     // Send Join Request
-                    await requestJoinTeam(searchedTeam.id, user.id);
+                    const { error: joinErr } = await requestJoinTeam(searchedTeam.id, user.id);
+                    if (joinErr) {
+                        setError(getFriendlyError(joinErr));
+                        return;
+                    }
                     setJoinRequestSent(true);
                     setStep(4); // Move to "Waiting for Approval" view in Step 4
                 }
@@ -291,7 +312,11 @@ function RegisterPageContent() {
     const handleSearchTeam = async () => {
         try {
             setLoading(true);
-            const team = await joinTeam(searchCode);
+            const { data: team, error: searchErr } = await joinTeam(searchCode);
+            if (searchErr) {
+                setError(getFriendlyError(searchErr));
+                return;
+            }
             setSearchedTeam(team);
             // Don't auto-proceed, let user see the team result
         } catch (err: any) { setError(getFriendlyError(err)); } finally { setLoading(false); }
@@ -342,7 +367,11 @@ function RegisterPageContent() {
 
             // EXECUTE DEFERRED WRITE
             if (additionalMembers.length > 0) {
-                await registerBulkMembers(userId!, teamDetails.id, additionalMembers);
+                const { error: bulkErr } = await registerBulkMembers(userId!, teamDetails.id, additionalMembers);
+                if (bulkErr) {
+                    setError(getFriendlyError(bulkErr));
+                    return;
+                }
                 // We keep additionalMembers in state until payment is done or just let them stay?
                 // Better to clear them so if they go back they don't see duplicates?
                 // No, if we clear them, we can't show them in Review if they come back from payment step.
@@ -361,7 +390,11 @@ function RegisterPageContent() {
     const handleJoinRequest = async () => {
         try {
             setLoading(true);
-            await requestJoinTeam(searchedTeam.id, userId!);
+            const { error: joinErr } = await requestJoinTeam(searchedTeam.id, userId!);
+            if (joinErr) {
+                setError(getFriendlyError(joinErr));
+                return;
+            }
             setJoinRequestSent(true);
         } catch (err: any) { setError(getFriendlyError(err)); } finally { setLoading(false); }
     };
@@ -392,11 +425,16 @@ function RegisterPageContent() {
             if (upErr) throw upErr;
 
             const { data: { publicUrl } } = supabase.storage.from("screenshots").getPublicUrl(upData.path);
-            await submitPayment(userId!, {
+            const { error: payErr } = await submitPayment(userId!, {
                 transaction_id: paymentProof.transaction_id,
                 screenshot_url: publicUrl,
                 assigned_qr_id: assignedQR?.id
             });
+
+            if (payErr) {
+                setError(getFriendlyError(payErr));
+                return;
+            }
 
             // Auto-login: Set session cookie with user ID and redirect to dashboard
             document.cookie = `student_session=${userId}; path=/; max-age=${60 * 60 * 24 * 30}`; // 30 days

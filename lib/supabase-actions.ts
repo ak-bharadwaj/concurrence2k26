@@ -42,68 +42,83 @@ export async function resetQRUsage() {
 }
 
 export async function createTeam(name: string, leaderId: string, paymentMode: "INDIVIDUAL" | "BULK" = "INDIVIDUAL", maxMembers: number = 5) {
-    let team = null;
-    let attempts = 0;
+    try {
+        let team = null;
+        let attempts = 0;
 
-    // Use Postgres RPC for atomic team number generation
-    const { data: team_number, error: rpcErr } = await supabase.rpc('generate_team_number');
-    if (rpcErr) {
-        console.error("Error generating team number via RPC:", rpcErr);
-        // Fallback logic if RPC fails (though it shouldn't if SQL is run)
-        throw new Error("Critical: Database sync required. Please run the fix script.");
-    }
-
-    while (attempts < 5) {
-        const unique_code = Math.random().toString(36).substring(2, 8).toUpperCase();
-        const { data, error } = await supabase
-            .from("teams")
-            .insert([{
-                name,
-                unique_code,
-                leader_id: leaderId,
-                payment_mode: paymentMode,
-                max_members: maxMembers,
-                team_number
-            }])
-            .select()
-            .single();
-
-        if (error && error.code === '23505' && error.message.includes('unique_code')) {
-            attempts++;
-            continue;
+        // Use Postgres RPC for atomic team number generation
+        const { data: team_number, error: rpcErr } = await supabase.rpc('generate_team_number');
+        if (rpcErr) {
+            console.error("Error generating team number via RPC:", rpcErr);
+            return { error: "Database initialization required. Please ask admin to run the setup script." };
         }
 
-        if (error) throw error;
-        team = data;
-        break;
-    }
+        while (attempts < 5) {
+            const unique_code = Math.random().toString(36).substring(2, 8).toUpperCase();
+            const { data, error } = await supabase
+                .from("teams")
+                .insert([{
+                    name,
+                    unique_code,
+                    leader_id: leaderId,
+                    payment_mode: paymentMode,
+                    max_members: maxMembers,
+                    team_number
+                }])
+                .select()
+                .single();
 
-    if (!team) throw new Error("Failed to generate a unique team code. Please try again.");
-    return team;
+            if (error && error.code === '23505' && error.message.includes('unique_code')) {
+                attempts++;
+                continue;
+            }
+
+            if (error) {
+                console.error("SUPABASE ERROR in createTeam:", error);
+                return { error };
+            }
+            team = data;
+            break;
+        }
+
+        if (!team) return { error: "Failed to generate a unique squad identity. Please try again." };
+        return { data: team };
+    } catch (err: any) {
+        console.error("UNEXPECTED ERROR in createTeam:", err);
+        return { error: err.message || "An unexpected error occurred during squad creation." };
+    }
 }
 
 export async function joinTeam(code: string) {
-    const { data: team, error } = await supabase
-        .from("teams")
-        .select("*")
-        .eq("unique_code", code)
-        .single();
+    try {
+        const { data: team, error } = await supabase
+            .from("teams")
+            .select("*")
+            .eq("unique_code", code.trim().toUpperCase())
+            .single();
 
-    if (error) throw new Error("Invalid Team Code");
+        if (error) {
+            console.error("ERROR finding squad:", error);
+            return { error: "Squad not found. Please verify the code and try again." };
+        }
 
-    // Check if team is full (including pending requests)
-    const { count: memberCount } = await supabase
-        .from("users")
-        .select("*", { count: 'exact', head: true })
-        .eq("team_id", team.id);
+        // Check if team is full
+        const { count: memberCount } = await supabase
+            .from("users")
+            .select("*", { count: 'exact', head: true })
+            .eq("team_id", team.id);
 
-    const totalMembers = (memberCount || 0);
+        const totalMembers = (memberCount || 0);
 
-    if (totalMembers >= (team.max_members || 5)) {
-        throw new Error("Oops, looks like you're late! This squad is already at maximum capacity.");
+        if (totalMembers >= (team.max_members || 5)) {
+            return { error: `Oops, looks like you're late! This squad '${team.name}' is already at maximum capacity.` };
+        }
+
+        return { data: team };
+    } catch (err: any) {
+        console.error("UNEXPECTED ERROR in joinTeam:", err);
+        return { error: err.message || "An unexpected error occurred while searching for the squad." };
     }
-
-    return team;
 }
 
 export async function getTeamDetails(teamId: string) {
@@ -147,72 +162,78 @@ export async function registerUser(userData: {
     tshirt_size?: string;
     role?: string;
 }) {
-    // 1. Check for existing record by Email (our new unique anchor)
-    const { data: existingUser } = await supabase
-        .from("users")
-        .select("id, status, phone")
-        .eq("email", userData.email)
-        .maybeSingle();
+    try {
+        // 1. Check for existing record by Email (our new unique anchor)
+        const { data: existingUser } = await supabase
+            .from("users")
+            .select("id, status, phone")
+            .eq("email", userData.email)
+            .maybeSingle();
 
-    if (existingUser && ["APPROVED", "PENDING", "VERIFYING"].includes(existingUser.status)) {
-        throw new Error("This registration (Email) is already locked (Approved/Pending). Please contact support for changes.");
+        if (existingUser && ["APPROVED", "PENDING", "VERIFYING"].includes(existingUser.status)) {
+            return { error: "This registration (Email) is already locked (Approved/Pending). Please contact support for changes." };
+        }
+
+        // 1b. Check if phone number is used by ANOTHER user
+        const { data: phoneConflict } = await supabase
+            .from("users")
+            .select("email")
+            .eq("phone", userData.phone)
+            .neq("email", userData.email) // Allow update for same email
+            .maybeSingle();
+
+        if (phoneConflict) {
+            return { error: `The mobile number ${userData.phone} is already linked to another registration. Please use a unique mobile number.` };
+        }
+
+        // 2. Verify team_id if provided
+        if (userData.team_id) {
+            const { data: team, error: teamErr } = await supabase.from("teams").select("id").eq("id", userData.team_id).maybeSingle();
+            if (teamErr || !team) return { error: "The specified squad does not exist." };
+        }
+
+        // 3. Sanitize input to prevent 'column does not exist' errors
+        const sanitizedData = {
+            name: userData.name,
+            reg_no: userData.reg_no,
+            email: userData.email,
+            phone: userData.phone,
+            college: userData.college,
+            branch: userData.branch,
+            year: userData.year,
+            team_id: userData.team_id,
+            role: userData.role || 'MEMBER',
+            tshirt_size: userData.tshirt_size,
+            status: "UNPAID",
+            transaction_id: null,
+            screenshot_url: null,
+            assigned_qr_id: null
+        };
+
+        const { data, error } = await supabase
+            .from("users")
+            .upsert(sanitizedData, { onConflict: 'email' })
+            .select()
+            .single();
+
+        if (error) {
+            console.error("SUPABASE ERROR in registerUser:", error);
+            return { error };
+        }
+
+        // Send Welcome Email (Non-blocking)
+        sendEmail(userData.email, "Registration Received - Hackathon 2K26", EMAIL_TEMPLATES.WELCOME(userData.name));
+
+        // If Leader, update team leader_id
+        if (userData.team_id && userData.role === 'LEADER') {
+            await supabase.from("teams").update({ leader_id: data.id }).eq("id", userData.team_id);
+        }
+
+        return { data };
+    } catch (err: any) {
+        console.error("UNEXPECTED ERROR in registerUser:", err);
+        return { error: err.message || "An unexpected error occurred during identity synchronization." };
     }
-
-    // 1b. Check if phone number is used by ANOTHER user
-    const { data: phoneConflict } = await supabase
-        .from("users")
-        .select("email")
-        .eq("phone", userData.phone)
-        .neq("email", userData.email) // Allow update for same email
-        .maybeSingle();
-
-    if (phoneConflict) {
-        throw new Error(`The mobile number ${userData.phone} is already linked to another registration. Please use a unique mobile number.`);
-    }
-
-    // 2. Verify team_id if provided
-    if (userData.team_id) {
-        const { data: team, error: teamErr } = await supabase.from("teams").select("id").eq("id", userData.team_id).maybeSingle();
-        if (teamErr || !team) throw new Error("The specified squad does not exist.");
-    }
-
-    // 3. Sanitize input to prevent 'column does not exist' errors
-    const sanitizedData = {
-        name: userData.name,
-        reg_no: userData.reg_no,
-        email: userData.email,
-        phone: userData.phone,
-        college: userData.college,
-        branch: userData.branch,
-        year: userData.year,
-        team_id: userData.team_id,
-        role: userData.role || 'MEMBER',
-        status: "UNPAID",
-        transaction_id: null,
-        screenshot_url: null,
-        assigned_qr_id: null
-    };
-
-    const { data, error } = await supabase
-        .from("users")
-        .upsert(sanitizedData, { onConflict: 'email' })
-        .select()
-        .single();
-
-    if (error) {
-        console.error("SUPABASE ERROR in registerUser:", error);
-        throw error;
-    }
-
-    // Send Welcome Email (Non-blocking)
-    sendEmail(userData.email, "Registration Received - Hackathon 2K26", EMAIL_TEMPLATES.WELCOME(userData.name));
-
-    // If Leader, update team leader_id
-    if (userData.team_id && userData.role === 'LEADER') {
-        await supabase.from("teams").update({ leader_id: data.id }).eq("id", userData.team_id);
-    }
-
-    return data;
 }
 
 // 2. Submit Payment Details
@@ -221,64 +242,71 @@ export async function submitPayment(userId: string, paymentData: {
     screenshot_url: string;
     assigned_qr_id?: string;
 }) {
-    // 0. Validate Transaction ID
-    const txId = paymentData.transaction_id?.trim();
-    if (!txId || txId.length < 12 || txId.length > 20) {
-        throw new Error("Transaction ID must be between 12 and 20 characters.");
-    }
+    try {
+        // 0. Validate Transaction ID
+        const txId = paymentData.transaction_id?.trim();
+        if (!txId || txId.length < 12 || txId.length > 20) {
+            return { error: "Transaction ID must be between 12 and 20 characters." };
+        }
 
-    // 0b. Check for duplicate Transaction ID
-    const { data: existingTx } = await supabase
-        .from("users")
-        .select("id")
-        .eq("transaction_id", txId)
-        .neq("id", userId)
-        .maybeSingle();
-
-    if (existingTx) {
-        throw new Error("This Transaction ID has already been submitted by another user.");
-    }
-
-    // 1. Fetch user and team info to check for BULK mode
-    const { data: user, error: uErr } = await supabase
-        .from("users")
-        .select("*, teams!team_id(*)")
-        .eq("id", userId)
-        .single();
-
-    if (uErr) throw uErr;
-
-    const isBulkLeader = user.role === 'LEADER' && user.teams?.payment_mode === 'BULK' && user.team_id;
-
-    // 2. Allow payment if user is unpaid OR is a leader of a bulk team
-    // (Removed strict blockage for non-leaders in BULK mode to allow late-joiners to pay for themselves)
-
-    // 3. Update the payer's status
-    const { error } = await supabase
-        .from("users")
-        .update({
-            ...paymentData,
-            status: "PENDING"
-        })
-        .eq("id", userId);
-
-    if (error) throw error;
-
-    // 4. If it's a BULK leader, push all members to PENDING for verification
-    if (isBulkLeader) {
-        // Only update members who are UNPAID or REJECTED
-        await supabase
+        // 0b. Check for duplicate Transaction ID
+        const { data: existingTx } = await supabase
             .from("users")
-            .update({ status: "PENDING" })
-            .eq("team_id", user.team_id)
+            .select("id")
+            .eq("transaction_id", txId)
             .neq("id", userId)
-            .in("status", ["UNPAID", "REJECTED"]);
+            .maybeSingle();
+
+        if (existingTx) {
+            return { error: "This Transaction ID has already been submitted by another user." };
+        }
+
+        // 1. Fetch user and team info to check for BULK mode
+        const { data: user, error: uErr } = await supabase
+            .from("users")
+            .select("*, teams!team_id(*)")
+            .eq("id", userId)
+            .single();
+
+        if (uErr) {
+            console.error("ERROR fetching user for payment:", uErr);
+            return { error: "Failed to verify user identity for payment submission." };
+        }
+
+        const isBulkLeader = user.role === 'LEADER' && user.teams?.payment_mode === 'BULK' && user.team_id;
+
+        // 3. Update the payer's status
+        const { error } = await supabase
+            .from("users")
+            .update({
+                ...paymentData,
+                status: "PENDING"
+            })
+            .eq("id", userId);
+
+        if (error) {
+            console.error("SUPABASE ERROR in submitPayment:", error);
+            return { error };
+        }
+
+        // 4. If it's a BULK leader, push all members to PENDING for verification
+        if (isBulkLeader) {
+            await supabase
+                .from("users")
+                .update({ status: "PENDING" })
+                .eq("team_id", user.team_id)
+                .neq("id", userId)
+                .in("status", ["UNPAID", "REJECTED"]);
+        }
+
+        // Send Email (Non-blocking)
+        sendEmail(user.email, "Payment Received - Hackathon 2K26", EMAIL_TEMPLATES.PAYMENT_RECEIVED(user.name));
+
+        return { data: true };
+    } catch (err: any) {
+        console.error("UNEXPECTED ERROR in submitPayment:", err);
+        return { error: err.message || "An unexpected error occurred during payment submission." };
     }
-
-    // Send Payment Received Email (Non-blocking)
-    sendEmail(user.email, "Payment Received - Hackathon 2K26", EMAIL_TEMPLATES.PAYMENT_RECEIVED(user.name));
-
-    return true;
 }
 
 export async function updateStatus(
@@ -374,55 +402,62 @@ export async function approveTeamPayment(
     adminId: string,
     paymentDetails: { transaction_id: string | null; screenshot_url: string | null }
 ) {
-    // 1. Fetch all team members to notify them later
-    const { data: members, error: mErr } = await supabase
-        .from("users")
-        .select("*")
-        .eq("team_id", teamId);
+    try {
+        // 1. Fetch all team members to notify them later
+        const { data: members, error: mErr } = await supabase
+            .from("users")
+            .select("*")
+            .eq("team_id", teamId);
 
-    if (mErr) throw mErr;
-    if (!members || members.length === 0) throw new Error("No members found in this squad.");
+        if (mErr) {
+            console.error("ERROR fetching squad members:", mErr);
+            return { error: "Failed to locate squad members for payment verification." };
+        }
+        if (!members || members.length === 0) return { error: "No members found in this squad." };
 
-    // 2. Update all members to APPROVED with the provided proof
-    // We only update those who are not already REJECTED (unless manual override intended, but usually safety first)
-    const { error: uErr } = await supabase
-        .from("users")
-        .update({
-            status: "APPROVED",
-            verified_by: adminId
-        })
-        .eq("team_id", teamId)
-        .neq("status", "REJECTED");
+        // 2. Update all members to APPROVED with the provided proof
+        const { error: uErr } = await supabase
+            .from("users")
+            .update({
+                status: "APPROVED",
+                verified_by: adminId,
+                is_present: true // Auto-verify on approval
+            })
+            .eq("team_id", teamId)
+            .neq("status", "REJECTED");
 
-    if (uErr) throw uErr;
+        if (uErr) {
+            console.error("ERROR updating member statuses:", uErr);
+            return { error: uErr };
+        }
 
-    // 3. Log the action (using the Team Leader or first member as reference)
-    const referenceUserId = members.find(m => m.role === 'LEADER')?.id || members[0].id;
-    await supabase.from("action_logs").insert([{
-        user_id: referenceUserId,
-        admin_id: adminId,
-        action: "BULK_APPROVE_PAYMENT"
-    }]);
+        // 3. Log the action
+        const referenceUserId = members.find(m => m.role === 'LEADER')?.id || members[0].id;
+        await supabase.from("action_logs").insert([{
+            user_id: referenceUserId,
+            admin_id: adminId,
+            action: "BULK_APPROVE_PAYMENT"
+        }]);
 
-    // 4. Send Emails
-    const qrUrl = (uid: string) => `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${uid}`;
+        // 4. Send Emails
+        const qrUrl = (uid: string) => `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${uid}`;
+        const leader = members.find(m => m.role === 'LEADER') || members[0];
+        const waLink = await getActiveGroupLink(leader.college);
 
-    // We need to fetch the WhatsApp link. Assuming all are from same college or using Leader's college.
-    const leader = members.find(m => m.role === 'LEADER') || members[0];
-    const waLink = await getActiveGroupLink(leader.college);
+        for (const member of members) {
+            if (member.status === "APPROVED") continue;
+            sendEmail(
+                member.email,
+                "Registration Approved! 🎉 - Hackathon 2K26",
+                EMAIL_TEMPLATES.PAYMENT_VERIFIED(member.name, qrUrl(member.id), member.reg_no, waLink || "")
+            );
+        }
 
-    for (const member of members) {
-        // Skip if they were already approved (to avoid spam) - though frontend usually handles this
-        if (member.status === "APPROVED") continue;
-
-        sendEmail(
-            member.email,
-            "Registration Approved! 🎉 - Hackathon 2K26",
-            EMAIL_TEMPLATES.PAYMENT_VERIFIED(member.name, qrUrl(member.id), member.reg_no, waLink || "")
-        );
+        return { data: true };
+    } catch (err: any) {
+        console.error("UNEXPECTED ERROR in approveTeamPayment:", err);
+        return { error: err.message || "An unexpected error occurred during squad payment approval." };
     }
-
-    return true;
 }
 
 export async function getActiveGroupLink(college: string) {
@@ -587,42 +622,51 @@ export async function respondToJoinRequest(requestId: string, status: 'ACCEPTED'
 }
 
 export async function registerBulkMembers(leaderId: string, teamId: string, members: any[]) {
-    // 1. Fetch existing statuses to prevent overwriting APPROVED/PENDING users
-    const emails = members.map(m => m.email);
-    const { data: existingUsers } = await supabase
-        .from("users")
-        .select("email, status")
-        .in("email", emails);
+    try {
+        // 1. Fetch existing statuses to prevent overwriting APPROVED/PENDING users
+        const emails = members.map(m => m.email);
+        const { data: existingUsers } = await supabase
+            .from("users")
+            .select("email, status")
+            .in("email", emails);
 
-    const lockedEmails = new Set(
-        existingUsers?.filter(u => ["APPROVED", "PENDING", "VERIFYING"].includes(u.status)).map(u => u.email) || []
-    );
+        const lockedEmails = new Set(
+            existingUsers?.filter(u => ["APPROVED", "PENDING", "VERIFYING"].includes(u.status)).map(u => u.email) || []
+        );
 
-    // 2. Filter out locked members
-    const membersToInsert = members
-        .filter(m => !lockedEmails.has(m.email))
-        .map(m => ({
-            name: m.name,
-            reg_no: m.reg_no,
-            email: m.email,
-            phone: m.phone,
-            college: m.college || 'RGM College',
-            branch: m.branch,
-            year: m.year,
-            team_id: teamId,
-            role: 'MEMBER',
-            status: 'UNPAID'
-        }));
+        // 2. Filter out locked members
+        const membersToInsert = members
+            .filter(m => !lockedEmails.has(m.email))
+            .map(m => ({
+                name: m.name,
+                reg_no: m.reg_no,
+                email: m.email,
+                phone: m.phone,
+                college: m.college || 'RGM College',
+                branch: m.branch,
+                year: m.year,
+                team_id: teamId,
+                role: 'MEMBER',
+                tshirt_size: m.tshirt_size,
+                status: 'UNPAID'
+            }));
 
-    if (membersToInsert.length === 0) return [];
+        if (membersToInsert.length === 0) return { data: [] };
 
-    const { data, error } = await supabase
-        .from("users")
-        .upsert(membersToInsert, { onConflict: 'email' })
-        .select();
+        const { data, error } = await supabase
+            .from("users")
+            .upsert(membersToInsert, { onConflict: 'email' })
+            .select();
 
-    if (error) throw error;
-    return data;
+        if (error) {
+            console.error("SUPABASE ERROR in registerBulkMembers:", error);
+            return { error };
+        }
+        return { data };
+    } catch (err: any) {
+        console.error("UNEXPECTED ERROR in registerBulkMembers:", err);
+        return { error: err.message || "An unexpected error occurred during squad member synchronization." };
+    }
 }
 
 // --- Team Management Functions ---
