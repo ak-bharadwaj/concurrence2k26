@@ -7,16 +7,16 @@ import { sendEmail, EMAIL_TEMPLATES } from "./email";
 export async function getNextAvailableQR(amount: number = 800) {
     try {
         const supabase = createAdminClient();
-        const { data: qr, error } = await supabase
+        const { data: qrs, error } = await supabase
             .from("qr_codes")
             .select("*")
             .eq("amount", amount)
             .eq("active", true)
             .order("today_usage", { ascending: true })
-            .limit(1)
-            .maybeSingle();
+            .limit(1);
 
         if (error) return { error: error.message };
+        const qr = qrs?.[0];
         if (!qr) return { data: null };
 
         const { error: updateError } = await supabase
@@ -64,29 +64,16 @@ export async function createTeam(name: string, leaderId: string | null, paymentM
                 max_members: maxMembers
             }])
             .select()
-            .single();
+            /* .single() removed to prevent coercion errors */;
 
         if (error) {
-            if (error.code === '23505') {
-                const newCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-                const { data: retryTeam, error: retryErr } = await supabase
-                    .from("teams")
-                    .insert([{
-                        name: name.trim(),
-                        unique_code: newCode,
-                        leader_id: leaderId,
-                        payment_mode: paymentMode,
-                        max_members: maxMembers
-                    }])
-                    .select()
-                    .single();
-                if (retryErr) return { error: retryErr.message };
-                return { data: retryTeam };
-            }
             return { error: error.message };
         }
 
-        return { data: team };
+        const teamData = team?.[0];
+        if (!teamData) return { error: "Failed to create team record." };
+
+        return { data: teamData };
     } catch (err: any) {
         return { error: err.message || "Failed to create team." };
     }
@@ -95,13 +82,15 @@ export async function createTeam(name: string, leaderId: string | null, paymentM
 export async function joinTeam(code: string) {
     try {
         const supabase = createAdminClient();
-        const { data: team, error } = await supabase
+        const { data, error } = await supabase
             .from("teams")
             .select("id, name, unique_code, payment_mode, max_members, leader_id, members:users!team_id(id), leader:users!leader_id(id, name, email, status)")
             .eq("unique_code", code.trim().toUpperCase())
-            .maybeSingle();
+            .limit(1);
 
         if (error) return { error: error.message };
+        const team = data?.[0];
+
         if (!team) return { error: "Squad not found. Please check the code." };
 
         return { data: team };
@@ -120,10 +109,12 @@ export async function getTeamDetails(teamId: string) {
                 members:users!team_id(*)
             `)
             .eq("id", teamId)
-            .single();
+            .limit(1);
 
         if (error) return { error: error.message };
-        return { data };
+        const teamDetails = data?.[0];
+        if (!teamDetails) return { error: "Squad details not found." };
+        return { data: teamDetails };
     } catch (err: any) {
         return { error: err.message || "Failed to fetch team details" };
     }
@@ -163,12 +154,13 @@ export async function registerUser(userData: {
     try {
         const supabase = createAdminClient();
         // 1. Check for existing record by Email (our new unique anchor)
-        const { data: existingUser } = await supabase
+        const { data: usersFound } = await supabase
             .from("users")
             .select("id, status, phone")
             .eq("email", userData.email.trim().toLowerCase())
-            .limit(1)
-            .maybeSingle();
+            .limit(1);
+
+        const existingUser = usersFound?.[0];
 
         if (existingUser && ["APPROVED", "PENDING", "VERIFYING"].includes(existingUser.status)) {
             return { error: "This registration (Email) is already locked (Approved/Pending). Please contact support for changes." };
@@ -178,8 +170,8 @@ export async function registerUser(userData: {
 
         // 2. Verify team_id if provided
         if (userData.team_id) {
-            const { data: team, error: teamErr } = await supabase.from("teams").select("id").eq("id", userData.team_id).maybeSingle();
-            if (teamErr || !team) return { error: "The specified squad does not exist." };
+            const { data: teamsFound, error: teamErr } = await supabase.from("teams").select("id").eq("id", userData.team_id).limit(1);
+            if (teamErr || !teamsFound || teamsFound.length === 0) return { error: "The specified squad does not exist." };
         }
 
         // 3. Sanitize input to prevent 'column does not exist' errors
@@ -204,26 +196,28 @@ export async function registerUser(userData: {
             .from("users")
             .upsert(sanitizedData, { onConflict: 'email' })
             .select()
-            .limit(1)
-            .single();
+            .limit(1);
 
         if (error) {
             console.error("SUPABASE ERROR in registerUser:", error);
             if (error.code === '42703') {
-                return { error: "Database Sync Required: Please run the 'add_tshirt_column.sql' script in your Supabase SQL Editor to enable t-shirt size selection." };
+                return { error: "Database Sync Required: Please run the 'add_tshirt_column.sql' script in your Supabase SQL Editor." };
             }
-            return { error: error.message || "Registration failed. Please try again." };
+            return { error: error.message || "Registration failed." };
         }
+
+        const registeredUser = data?.[0];
+        if (!registeredUser) return { error: "No user returned from registration." };
 
         // Send Welcome Email (Non-blocking)
         sendEmail(userData.email, "Registration Received - Hackathon 2K26", EMAIL_TEMPLATES.WELCOME(userData.name));
 
         // If Leader, update team leader_id
         if (userData.team_id && userData.role === 'LEADER') {
-            await supabase.from("teams").update({ leader_id: data.id }).eq("id", userData.team_id);
+            await supabase.from("teams").update({ leader_id: registeredUser.id }).eq("id", userData.team_id);
         }
 
-        return { data };
+        return { data: registeredUser };
     } catch (err: any) {
         console.error("UNEXPECTED ERROR in registerUser:", err);
         return { error: err.message || "An unexpected error occurred during identity synchronization." };
@@ -282,7 +276,7 @@ export async function submitPayment(userId: string, paymentData: {
         }
 
         const supabase = createAdminClient();
-        const { data: user, error: userErr } = await supabase
+        const { data: users, error: userErr } = await supabase
             .from("users")
             .update({
                 transaction_id: paymentData.transaction_id,
@@ -292,10 +286,11 @@ export async function submitPayment(userId: string, paymentData: {
             })
             .eq("id", userId)
             .select("id, name, reg_no, email, phone, status, teams!team_id(id, name, unique_code, payment_mode)")
-            .limit(1)
-            .single();
+            .limit(1);
 
         if (userErr) return { error: userErr.message };
+        const user = users?.[0] as any;
+        if (!user) return { error: "User not found after payment update." };
 
         // If this user is a MEMBER of a team, and the team is INDIVIDUAL payment, 
         // we might want to check if they are the last one to pay (not required for now)
@@ -333,11 +328,13 @@ export async function updateStatus(
     const supabase = createAdminClient();
 
     // Verify admin role
-    const { data: adminUser } = await supabase
+    const { data: adminUserFound } = await supabase
         .from("admins")
         .select("role")
         .eq("id", adminSessionId)
-        .single();
+        .limit(1);
+
+    const adminUser = adminUserFound?.[0];
 
     if (!adminUser) {
         return { error: "Unauthorized: Invalid Admin" };
@@ -351,15 +348,17 @@ export async function updateStatus(
     }
 
     try {
-        const { data: user, error } = await supabase
+        const { data: userFound, error } = await supabase
             .from("users")
             .update(updateData)
             .eq("id", userId)
             .neq("status", newStatus)
             .select("id, name, email, reg_no, status, role, team_id, teams!team_id(id, name, payment_mode)")
-            .single();
+            .limit(1);
 
         if (error) return { error: error.message };
+        const user = userFound?.[0];
+
         if (!user) return { error: "User not found" };
 
         const teamsData: any = user.teams;
@@ -438,14 +437,15 @@ export async function approveTeamPayment(
 
         const supabase = createAdminClient();
 
-        const { data: team, error: teamErr } = await supabase
+        const { data: teamFound, error: teamErr } = await supabase
             .from("teams")
             .update({}) // Status removed, column doesn't exist
             .eq("id", teamId)
             .select()
-            .single();
+            .limit(1);
 
         if (teamErr) return { error: teamErr.message };
+        const team = teamFound?.[0];
 
         const { error: membersErr } = await supabase
             .from("users")
@@ -534,13 +534,13 @@ export async function requestJoinTeam(teamId: string, userId: string | null, can
                 onConflict: userId ? 'team_id,user_id' : undefined // Let DB handle anonymous or use policy
             })
             .select()
-            .single();
+            .limit(1);
 
         if (error) {
             console.error("requestJoinTeam Error:", error);
             return { error: `DB Error: ${error.message}` };
         }
-        return { data };
+        return { data: data?.[0] };
     } catch (err: any) {
         return { error: err.message };
     }
@@ -611,16 +611,19 @@ export async function getUserJoinRequest(userId: string) {
 export async function respondToJoinRequest(requestId: string, status: 'ACCEPTED' | 'REJECTED') {
     try {
         const supabase = createAdminClient();
-        const { data: request, error: reqErr } = await supabase
+        const { data: requestFound, error: reqErr } = await supabase
             .from("join_requests")
             .select("*, users!user_id(name, email)")
             .eq("id", requestId)
-            .single();
+            .limit(1);
 
         if (reqErr) return { error: reqErr.message };
+        const request = requestFound?.[0];
+        if (!request) return { error: "Request not found" };
 
         if (status === 'ACCEPTED') {
-            const { data: team } = await supabase.from("teams").select("max_members, leader_id, users!leader_id(status)").eq("id", request.team_id).single();
+            const { data: teamsFound } = await supabase.from("teams").select("max_members, leader_id, users!leader_id(status)").eq("id", request.team_id).limit(1);
+            const team = teamsFound?.[0];
             const { count } = await supabase.from("users").select("*", { count: 'exact', head: true }).eq("team_id", request.team_id);
 
             const currentMax = team?.max_members || 5;
@@ -741,7 +744,8 @@ export async function removeMemberFromTeam(userId: string, teamId: string) {
 export async function leaveTeam(userId: string) {
     try {
         const supabase = createAdminClient();
-        const { data: user } = await supabase.from("users").select("role, team_id").eq("id", userId).single();
+        const { data: usersFound } = await supabase.from("users").select("role, team_id").eq("id", userId).limit(1);
+        const user = usersFound?.[0];
         if (user?.role === 'LEADER') {
             return { error: "Leaders cannot leave. You must delete the squad to disband." };
         }
@@ -776,7 +780,8 @@ export async function updateTeamSettings(teamId: string, settings: { name?: stri
 export async function deleteTeam(teamId: string) {
     try {
         const supabase = createAdminClient();
-        const { data: team } = await supabase.from("teams").select("payment_mode").eq("id", teamId).single();
+        const { data: teamsFound } = await supabase.from("teams").select("payment_mode").eq("id", teamId).limit(1);
+        const team = teamsFound?.[0];
 
         const updateData: any = { team_id: null, role: "MEMBER" };
         if (team?.payment_mode === 'BULK') {
@@ -818,7 +823,8 @@ export async function addMemberToTeam(memberData: any, teamId: string) {
             return { error: "This participant is already registered in another squad." };
         }
 
-        const { data: team } = await supabase.from("teams").select("id, name, max_members, payment_mode, leader_id, users!leader_id(status, email, college)").eq("id", teamId).single();
+        const { data: teamsFound } = await supabase.from("teams").select("id, name, max_members, payment_mode, leader_id, users!leader_id(status, email, college)").eq("id", teamId).limit(1);
+        const team = teamsFound?.[0];
         const { count } = await supabase.from("users").select("*", { count: 'exact', head: true }).eq("team_id", teamId);
 
         if (count !== null && count >= (team?.max_members || 5)) {
@@ -848,7 +854,7 @@ export async function addMemberToTeam(memberData: any, teamId: string) {
             const finalCollege = (college === 'OTHERS' && otherCollege) ? otherCollege : (college || teamLeader?.college);
             const targetStatus = team?.payment_mode === "BULK" ? (teamLeader?.status || "PENDING") : "UNPAID";
 
-            const { data: newUser, error: iErr } = await supabase
+            const { data: newUsersFound, error: iErr } = await supabase
                 .from("users")
                 .insert([{
                     reg_no: reg_no.trim().toUpperCase(),
@@ -864,9 +870,10 @@ export async function addMemberToTeam(memberData: any, teamId: string) {
                     status: targetStatus
                 }])
                 .select()
-                .single();
+                .limit(1);
 
             if (iErr) return { error: iErr.message };
+            const newUser = newUsersFound?.[0];
             return { data: newUser };
         }
     } catch (err: any) {
@@ -902,10 +909,12 @@ export async function markAttendance(userId: string, teamId: string, date: strin
                 status: 'PRESENT'
             }], { onConflict: 'user_id, attendance_date' })
             .select()
-            .single();
+            .limit(1);
 
         if (error) return { error: error.message };
-        return { data };
+        const result = data?.[0];
+        if (!result) return { error: "Record not found." };
+        return { data: result };
     } catch (err: any) {
         return { error: err.message };
     }
@@ -943,12 +952,13 @@ export async function fetchAttendanceReport(date: string) {
 export async function sendCustomUserEmail(userId: string, subject: string, message: string) {
     try {
         const supabase = createAdminClient();
-        const { data: user, error: userErr } = await supabase
+        const { data: usersFound, error: userErr } = await supabase
             .from("users")
             .select("name, email")
             .eq("id", userId)
-            .single();
+            .limit(1);
 
+        const user = usersFound?.[0];
         if (userErr || !user) return { error: "User not found" };
 
         await sendEmail(user.email, subject, EMAIL_TEMPLATES.CUSTOM(user.name, subject, message));

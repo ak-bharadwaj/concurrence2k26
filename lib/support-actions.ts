@@ -59,10 +59,10 @@ export async function submitSupportTicket(ticketData: {
             .from("support_tickets")
             .insert([ticketData])
             .select()
-            .single();
+            .limit(1);
 
         if (error) return { error: error.message };
-        return { data };
+        return { data: data?.[0] };
     } catch (err: any) {
         return { error: err.message };
     }

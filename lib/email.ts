@@ -8,12 +8,13 @@ export async function sendEmail(to: string, subject: string, html: string) {
 
     try {
         // 1. Try to fetch active email account from Supabase
-        const { data: dbAccount } = await supabase
+        const { data: dbAccountsData } = await supabase
             .from("email_accounts")
             .select("*")
             .eq("active", true)
-            .limit(1)
-            .single();
+            .limit(1);
+
+        const dbAccount = dbAccountsData?.[0];
 
         if (dbAccount) {
             transporter = nodemailer.createTransport({

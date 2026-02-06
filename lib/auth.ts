@@ -1,15 +1,20 @@
 import { supabase } from "./supabase";
 
 export async function adminLogin(username: string, password_hash: string) {
-    const { data: admin, error } = await supabase
+    const { data: adminData, error } = await supabase
         .from("admins")
         .select("*")
         .eq("username", username)
         .eq("password_hash", password_hash) // In production, use bcrypt.compare
         .eq("active", true)
-        .single();
+        .limit(1);
 
-    if (error || !admin) {
+    if (error) {
+        throw new Error("Invalid username or password");
+    }
+
+    const admin = adminData?.[0];
+    if (!admin) {
         throw new Error("Invalid username or password");
     }
 

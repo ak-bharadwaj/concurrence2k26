@@ -22,14 +22,16 @@ export default function LoginPage() {
 
         try {
             // 1. Verify credentials against 'users' table
-            const { data, error } = await supabase
+            const { data: users, error } = await supabase
                 .from("users")
                 .select("id, name, email")
                 .eq("email", email)
                 .eq("reg_no", regNo)
-                .maybeSingle();
+                .limit(1);
 
             if (error) throw error;
+            const data = users?.[0];
+
             if (!data) throw new Error("Invalid email or registration number.");
 
             // 2. Set Session Cookie (Persistent - 30 days)
