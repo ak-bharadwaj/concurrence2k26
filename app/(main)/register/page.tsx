@@ -111,13 +111,29 @@ function RegisterPageContent() {
     const [assignedQR, setAssignedQR] = useState<any>(null);
     const [finalAmount, setFinalAmount] = useState<number | null>(null);
     const [paymentProof, setPaymentProof] = useState({ transaction_id: "", screenshot: null as File | null });
+    const qrFetchLock = React.useRef(false);
+
+    async function fetchAndSetQR(amount: number) {
+        if (qrFetchLock.current) return;
+        try {
+            qrFetchLock.current = true;
+            const { data, error: qrErr } = await getNextAvailableQR(amount);
+            if (qrErr) throw new Error(qrErr);
+            if (data) setAssignedQR(data);
+        } catch (e: any) {
+            console.error("QR Fetch Error:", e);
+        } finally {
+            qrFetchLock.current = false;
+        }
+    }
 
     async function loadPaymentInfo(fixedAmount?: number) {
         try {
             setLoading(true);
-            const qr = await getNextAvailableQR(fixedAmount || totalAmount);
-            setAssignedQR(qr);
-        } catch (e) { } finally { setLoading(false); }
+            await fetchAndSetQR(fixedAmount || totalAmount);
+        } catch (e: any) {
+            console.error("Error loading payment info:", e);
+        } finally { setLoading(false); }
     }
 
     // --- Price Calculation ---
@@ -163,7 +179,9 @@ function RegisterPageContent() {
                 filter: `id=eq.${userId}`
             }, (payload) => {
                 if (payload.new.team_id && !teamDetails && regMode === 'SQUAD') {
-                    getTeamDetails(payload.new.team_id).then(setTeamDetails);
+                    getTeamDetails(payload.new.team_id).then(resp => {
+                        if (resp.data) setTeamDetails(resp.data);
+                    });
                     if (payload.new.role) setUserRole(payload.new.role);
                     if (step < 4) setStep(4);
                 }
@@ -213,7 +231,11 @@ function RegisterPageContent() {
                 table: 'users',
                 filter: `team_id=eq.${teamDetails.id}`
             }, () => {
-                getTeamDetails(teamDetails.id).then(setTeamDetails);
+                if (teamDetails?.id) {
+                    getTeamDetails(teamDetails.id).then(resp => {
+                        if (resp.data) setTeamDetails(resp.data);
+                    });
+                }
             })
             .subscribe();
 
@@ -225,8 +247,8 @@ function RegisterPageContent() {
         if (!teamDetails?.id || regMode !== 'SQUAD' || squadSubMode !== 'FORM') return;
 
         const fetchRequests = async () => {
-            const reqs = await getJoinRequests(teamDetails.id);
-            setPendingRequests(reqs);
+            const { data: reqs } = await getJoinRequests(teamDetails.id);
+            if (reqs) setPendingRequests(reqs);
         };
         fetchRequests();
 
@@ -248,25 +270,22 @@ function RegisterPageContent() {
     // PREFETCH QR FOR SOLO USERS IN STEP 2
     useEffect(() => {
         if (step === 2 && regMode === "SOLO" && !assignedQR) {
-            getNextAvailableQR(800).then(qr => {
-                if (qr) setAssignedQR(qr);
-            });
+            fetchAndSetQR(800);
         }
     }, [step, regMode, assignedQR]);
 
     // PREFETCH QR FOR SQUADS IN STEP 5 (Review)
     useEffect(() => {
         if (step === 5 && regMode === "SQUAD" && !assignedQR && finalAmount) {
-            getNextAvailableQR(finalAmount).then(qr => {
-                if (qr) setAssignedQR(qr);
-            });
+            fetchAndSetQR(finalAmount);
         }
     }, [step, regMode, assignedQR, finalAmount]);
 
     const handleRespondToRequest = async (requestId: string, status: 'ACCEPTED' | 'REJECTED') => {
         try {
             setLoading(true);
-            await respondToJoinRequest(requestId, status);
+            const { error } = await respondToJoinRequest(requestId, status);
+            if (error) throw new Error(error);
         } catch (err: any) { setError(getFriendlyError(err)); } finally { setLoading(false); }
     };
 
@@ -336,7 +355,6 @@ function RegisterPageContent() {
                 return;
             }
             setSearchedTeam(team);
-            // Don't auto-proceed, let user see the team result
         } catch (err: any) { setError(getFriendlyError(err)); } finally { setLoading(false); }
     };
 
@@ -402,12 +420,9 @@ function RegisterPageContent() {
     const handleProceedToPayment = async () => {
         try {
             setLoading(true);
-
-            // EXECUTE DEFERRED WRITE
-            // [REMOVED] Premature write. All writes must happen in handlePaymentSubmit.
-
-            const qr = await getNextAvailableQR(finalAmount || 800);
-            setAssignedQR(qr);
+            if (!assignedQR) {
+                await fetchAndSetQR(finalAmount || 800);
+            }
             setStep(6);
         } catch (err: any) { setError(getFriendlyError(err)); } finally { setLoading(false); }
     };
@@ -419,7 +434,7 @@ function RegisterPageContent() {
             if (!searchedTeam?.id) throw new Error("No squad selected. Please go back and find a squad.");
             setLoading(true);
             const { error: joinErr } = await requestJoinTeam(searchedTeam.id, overrideId || userId, formData);
-            if (joinErr) throw new Error(typeof joinErr === 'string' ? joinErr : (joinErr as any).message || "Join request failed");
+            if (joinErr) throw new Error(joinErr);
 
             setJoinRequestSent(true);
             setJoinRequestStatus('PENDING');
@@ -511,15 +526,19 @@ function RegisterPageContent() {
 
                 // 2. Create Team
                 const isRgm = userParams.college.toUpperCase().includes("RGM");
-                const { data: team } = await createTeam(teamName, user.id, "BULK", isRgm ? 4 : 5);
+                const teamResp = await createTeam(teamName, user.id, "BULK", isRgm ? 4 : 5);
+                if (teamResp.error) throw new Error(teamResp.error);
+                const team = teamResp.data;
                 createdTeamId = team.id; // Track for rollback
 
                 // 3. Update Leader with Team ID and Role
-                await supabase.from("users").update({ team_id: team.id, role: "LEADER" }).eq("id", user.id);
+                const { error: updErr } = await supabase.from("users").update({ team_id: team.id, role: "LEADER" }).eq("id", user.id);
+                if (updErr) throw new Error(updErr.message);
 
                 // 4. Register Bulk Members with Atomic Status (Pending)
                 if (additionalMembers.length > 0) {
-                    await registerBulkMembers(user.id, team.id, additionalMembers, "PENDING");
+                    const bulkResp = await registerBulkMembers(user.id, team.id, additionalMembers, "PENDING");
+                    if (bulkResp.error) throw new Error(bulkResp.error);
                 }
             }
 
@@ -558,7 +577,7 @@ function RegisterPageContent() {
                     screenshot_url: publicUrl,
                     assigned_qr_id: assignedQR?.id
                 });
-                if (payErr) throw new Error(payErr.message || "Payment submission failed");
+                if (payErr) throw new Error(payErr);
             }
 
             // Success Sequence
@@ -704,10 +723,8 @@ function RegisterPageContent() {
                                         onClick={async () => {
                                             try {
                                                 setLoading(true);
-                                                // QR prefetch is handled by useEffect, but we double check here
                                                 if (!assignedQR) {
-                                                    const qr = await getNextAvailableQR(800);
-                                                    setAssignedQR(qr);
+                                                    await fetchAndSetQR(800);
                                                 }
                                                 setFinalAmount(800);
                                                 setStep(6);
