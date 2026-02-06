@@ -345,8 +345,9 @@ function RegisterPageContent() {
         setStep(3); // Move to Identity Check
     };
 
-    const handleAddMember = () => {
+    const handleAddMember = async () => {
         if (!newMember.name || !newMember.reg_no) return;
+        if (loading) return;
 
         const currentTotal = (teamDetails?.members?.length || 1) + additionalMembers.length;
         const maxLimit = teamDetails?.max_members || 5;
@@ -355,13 +356,32 @@ function RegisterPageContent() {
             return alert(`Maximum capacity reached (${maxLimit} warriors).`);
         }
 
-        const addedMember = {
-            ...newMember,
-            tshirt_size: newMember.tshirtSize
-        };
-        setAdditionalMembers([...additionalMembers, addedMember]);
-        setNewMember({ name: "", reg_no: "", email: "", phone: "", college: "RGM", otherCollege: "", branch: "", year: "", tshirtSize: "M" });
-        setShowAddMemberModal(false);
+        try {
+            setLoading(true);
+            // ZERO-LEAK: Check if this member is already registered/paid
+            const { error: conflictErr } = await checkUserAvailability(newMember.email, newMember.phone);
+            if (conflictErr) {
+                // If it's the generic "already registered" error, make it clearer for squad context
+                if (typeof conflictErr === 'string' && conflictErr.includes("registered")) {
+                    alert(`Cannot add ${newMember.name}: This user is already registered.`);
+                } else {
+                    alert(`${newMember.name}: ${typeof conflictErr === 'string' ? conflictErr : (conflictErr as any).message}`);
+                }
+                return;
+            }
+
+            const addedMember = {
+                ...newMember,
+                tshirt_size: newMember.tshirtSize
+            };
+            setAdditionalMembers([...additionalMembers, addedMember]);
+            setNewMember({ name: "", reg_no: "", email: "", phone: "", college: "RGM", otherCollege: "", branch: "", year: "", tshirtSize: "M" });
+            setShowAddMemberModal(false);
+        } catch (err) {
+            alert("Validation failed. Please try again.");
+        } finally {
+            setLoading(false);
+        }
     };
 
     const handleFinalSquadSubmit = async () => {
