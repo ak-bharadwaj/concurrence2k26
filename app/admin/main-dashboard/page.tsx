@@ -414,7 +414,8 @@ export default function MainDashboard() {
                         ...t,
                         memberCount: teamMembers.length,
                         isVirtual: false,
-                        members: teamMembers
+                        members: teamMembers,
+                        proofs: teamMembers.filter((m: any) => m.screenshot_url || m.transaction_id),
                     };
                 }),
                 // Filter out users who have a team_id (truthy)
@@ -426,6 +427,7 @@ export default function MainDashboard() {
                     payment_mode: 'INDIVIDUAL',
                     memberCount: 1,
                     members: [u],
+                    proofs: [u],
                     created_at: u.created_at
                 }))
             ].sort((a: any, b: any) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
@@ -712,7 +714,7 @@ export default function MainDashboard() {
                     teamName: u.squad?.name,
                     teamNumber: u.squad?.team_number || u.squad?.unique_code,
                     members: teamMembers,
-                    proofs: teamMembers.filter((m: any) => m.screenshot_url),
+                    proofs: teamMembers.filter((m: any) => m.screenshot_url || m.transaction_id),
                     count: teamMembers.length,
                     max_members: u.squad?.max_members
                 });
