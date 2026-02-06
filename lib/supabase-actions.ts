@@ -166,7 +166,8 @@ export async function registerUser(userData: {
         const { data: existingUser } = await supabase
             .from("users")
             .select("id, status, phone")
-            .eq("email", userData.email)
+            .eq("email", userData.email.trim().toLowerCase())
+            .limit(1)
             .maybeSingle();
 
         if (existingUser && ["APPROVED", "PENDING", "VERIFYING"].includes(existingUser.status)) {
@@ -203,6 +204,7 @@ export async function registerUser(userData: {
             .from("users")
             .upsert(sanitizedData, { onConflict: 'email' })
             .select()
+            .limit(1)
             .single();
 
         if (error) {
@@ -290,6 +292,7 @@ export async function submitPayment(userId: string, paymentData: {
             })
             .eq("id", userId)
             .select("id, name, reg_no, email, phone, status, teams!team_id(id, name, unique_code, payment_mode)")
+            .limit(1)
             .single();
 
         if (userErr) return { error: userErr.message };

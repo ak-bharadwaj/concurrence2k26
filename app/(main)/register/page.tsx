@@ -192,7 +192,7 @@ function RegisterPageContent() {
             setLoading(true);
 
             // Fetch User Data
-            supabase.from("users").select("*").eq("id", existingUserId).single().then(async ({ data: userData, error: uErr }) => {
+            supabase.from("users").select("*").eq("id", existingUserId).limit(1).single().then(async ({ data: userData, error: uErr }) => {
                 if (uErr || !userData) {
                     setLoading(false);
                     return;
