@@ -961,39 +961,7 @@ function RegisterPageContent() {
                         <motion.div key="s6" className="glass-card p-6 sm:p-8 rounded-3xl space-y-8">
                             <Header title="Secure Payment" subtitle="Synchronize transmission" />
 
-                            <div className="flex flex-col items-center gap-6">
-                                <p className="text-[10px] text-cyan-400 font-black uppercase tracking-[0.2em] text-center bg-cyan-500/10 py-2 px-4 rounded-full border border-cyan-500/20">
-                                    Long press the QR code below to save it to your phone
-                                </p>
-
-                                <div className="relative p-4 bg-white rounded-[2.5rem] shadow-2xl group transition-all duration-500 hover:scale-105 active:scale-95">
-                                    {assignedQR?.qr_image_url ? (
-                                        <Image src={assignedQR.qr_image_url} alt="Payment QR" width={280} height={280} className="rounded-3xl" />
-                                    ) : (
-                                        <div className="w-[280px] h-[280px] bg-neutral-200 rounded-3xl flex items-center justify-center">
-                                            {assignedQR ? (
-                                                <div className="text-black font-bold text-center p-4 text-xs">QR Image Not Available</div>
-                                            ) : (
-                                                <Loader2 className="w-10 h-10 text-cyan-500 animate-spin" />
-                                            )}
-                                        </div>
-                                    )}
-                                </div>
-
-                                <a
-                                    href={assignedQR?.qr_image_url || "#"}
-                                    download="Hackathon_Payment_QR.png"
-                                    className="px-8 py-3 bg-white/5 border border-white/10 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-white/10 transition-all flex items-center gap-2"
-                                >
-                                    <Download className="w-4 h-4 text-cyan-500" /> Save QR TO MOBILE
-                                </a>
-
-                                <div className="text-center space-y-2">
-                                    <p className="text-sm font-black text-white/40 uppercase tracking-widest">Amount to Pay</p>
-                                    <p className="text-4xl font-black text-white tracking-tighter">₹{finalAmount}</p>
-                                </div>
-                            </div>
-                            <div className="text-center bg-black/40 p-6 rounded-2xl border border-white/10 relative overflow-hidden min-h-[300px] flex flex-col items-center justify-center">
+                            <div className="text-center bg-black/40 p-6 sm:p-10 rounded-3xl border border-white/10 relative overflow-hidden min-h-[400px] flex flex-col items-center justify-center space-y-6">
                                 {loading || !assignedQR ? (
                                     <div className="flex flex-col items-center gap-4 py-12">
                                         <Loader2 className="w-12 h-12 text-cyan-500 animate-spin" />
@@ -1001,20 +969,41 @@ function RegisterPageContent() {
                                     </div>
                                 ) : (
                                     <>
-                                        <p className="text-[10px] text-white/40 uppercase tracking-widest mb-1 font-bold">Payable amount</p>
-                                        <p className="text-4xl sm:text-5xl font-black text-white tracking-tighter">₹{finalAmount || 0}</p>
-                                        <div className="bg-white p-3 rounded-2xl w-40 h-40 sm:w-48 sm:h-48 mx-auto my-6 shadow-[0_0_40px_rgba(255,255,255,0.1)]">
-                                            {assignedQR?.qr_image_url ? (
-                                                <Image src={assignedQR.qr_image_url} alt="Pay" width={200} height={200} className="w-full h-full object-contain" />
-                                            ) : (
-                                                <div className="w-full h-full bg-neutral-200 flex items-center justify-center text-black font-black text-[10px] uppercase text-center p-4">QR Signal Lost. Refresh.</div>
-                                            )}
+                                        <div className="space-y-1">
+                                            <p className="text-[10px] text-white/40 uppercase tracking-widest font-bold">Payable amount</p>
+                                            <p className="text-5xl sm:text-6xl font-black text-white tracking-tighter">₹{finalAmount || 0}</p>
                                         </div>
-                                        <div className="space-y-2">
-                                            <p className="text-xs font-black uppercase text-white/60">{assignedQR?.upi_name || "Payment Portal"}</p>
-                                            <div className="flex items-center justify-center gap-2 bg-white/5 py-2.5 px-4 rounded-xl font-mono text-cyan-400 border border-white/5 text-xs active:bg-white/10 transition-all cursor-pointer" onClick={() => assignedQR?.upi_id && navigator.clipboard.writeText(assignedQR.upi_id)}>
-                                                {assignedQR?.upi_id || "No UPI ID found"} <Copy className="w-3 h-3" />
+
+                                        <div className="relative group">
+                                            <div className="bg-white p-4 rounded-3xl shadow-[0_0_50px_rgba(255,255,255,0.15)] transition-transform duration-500 hover:scale-105">
+                                                {assignedQR?.qr_image_url ? (
+                                                    <Image src={assignedQR.qr_image_url} alt="Pay" width={280} height={280} className="rounded-2xl" />
+                                                ) : (
+                                                    <div className="w-[280px] h-[280px] bg-neutral-200 flex items-center justify-center text-black font-black text-[10px] uppercase text-center p-4 rounded-2xl">QR Signal Lost. Refresh.</div>
+                                                )}
                                             </div>
+                                            <a
+                                                href={assignedQR?.qr_image_url || "#"}
+                                                download="Hackathon_QR.png"
+                                                className="block mt-4 text-[10px] uppercase font-bold tracking-widest text-cyan-400 hover:text-cyan-300 transition-colors cursor-pointer"
+                                            >
+                                                Tap to download QR
+                                            </a>
+                                        </div>
+
+                                        <div className="space-y-3 w-full max-w-xs">
+                                            <p className="text-xs font-black uppercase text-white/60">{assignedQR?.upi_name || "Payment Portal"}</p>
+                                            <button
+                                                onClick={() => {
+                                                    if (assignedQR?.upi_id) {
+                                                        navigator.clipboard.writeText(assignedQR.upi_id);
+                                                        // Optional: Add toast here
+                                                    }
+                                                }}
+                                                className="w-full flex items-center justify-center gap-2 bg-white/5 py-3 px-4 rounded-xl font-mono text-cyan-400 border border-white/5 text-xs hover:bg-white/10 active:scale-95 transition-all"
+                                            >
+                                                {assignedQR?.upi_id || "No UPI ID found"} <Copy className="w-3 h-3" />
+                                            </button>
                                         </div>
                                     </>
                                 )}

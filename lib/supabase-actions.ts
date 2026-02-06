@@ -24,19 +24,12 @@ export async function getNextAvailableQR(amount: number = 800) {
             .eq("id", qr.id);
 
         if (updateError) {
-            console.error("QR Update Error:", updateError);
-            // Log to file for debugging
-            const fs = require('fs');
-            fs.appendFileSync('server_qr_log.txt', `MS: Update Error: ${JSON.stringify(updateError)}\n`);
+             console.error("QR Update Error:", updateError);
         }
 
         return qr;
     } catch (err: any) {
         console.error("Error fetching QR:", err);
-        try {
-            const fs = require('fs');
-            fs.appendFileSync('server_qr_log.txt', `MS: Fetch Error: ${JSON.stringify(err)}\n`);
-        } catch (e) { }
         return null;
     }
 }
