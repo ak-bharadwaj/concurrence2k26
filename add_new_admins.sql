@@ -3,9 +3,9 @@
 
 INSERT INTO public.admins (username, password_hash, role)
 VALUES 
-    ('aman', 'Aman@1907Syed', 'ADMIN'),
-    ('javya', 'Javya@2705Yalluri', 'ADMIN'),
-    ('rafi', 'Rafikarishma@12', 'ADMIN')
+    ('aman', 'Aman@1907Syed', 'MAIN'),
+    ('javya', 'Javya@2705Yalluri', 'SUB'),
+    ('rafi', 'Rafikarishma@12', 'SUB')
 ON CONFLICT (username) 
 DO UPDATE SET 
     password_hash = EXCLUDED.password_hash,
