@@ -409,7 +409,7 @@ export async function deleteUser(userId: string) {
         .from("users")
         .delete()
         .eq("id", userId);
-    if (error) throw error;
+    if (error) throw new Error(error.message);
     return true;
 }
 
@@ -714,7 +714,7 @@ export async function updateMemberDetails(userId: string, updates: any) {
         .update(updates)
         .eq("id", userId);
 
-    if (error) throw error;
+    if (error) throw new Error(error.message);
     return true;
 }
 
@@ -731,7 +731,7 @@ export async function markAttendance(userId: string, teamId: string, date: strin
         .select()
         .single();
 
-    if (error) throw error;
+    if (error) throw new Error(error.message);
     return data;
 }
 
@@ -740,14 +740,14 @@ export async function fetchAttendanceReport(date: string) {
         .from("users")
         .select("id, name, reg_no, status, team_id, teams!team_id(name, team_number)");
 
-    if (uErr) throw uErr;
+    if (uErr) throw new Error(uErr.message);
 
     const { data: attendance, error: aErr } = await supabase
         .from("attendance")
         .select("*")
         .eq("attendance_date", date);
 
-    if (aErr) throw aErr;
+    if (aErr) throw new Error(aErr.message);
 
     return users.map(u => {
         const record = attendance?.find(a => a.user_id === u.id);
