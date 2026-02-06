@@ -112,14 +112,18 @@ function RegisterPageContent() {
     const [finalAmount, setFinalAmount] = useState<number | null>(null);
     const [paymentProof, setPaymentProof] = useState({ transaction_id: "", screenshot: null as File | null });
     const qrFetchLock = React.useRef(false);
+    const hasFetchedQR = React.useRef(false);
 
     async function fetchAndSetQR(amount: number) {
-        if (qrFetchLock.current) return;
+        if (qrFetchLock.current || hasFetchedQR.current) return;
         try {
             qrFetchLock.current = true;
             const { data, error: qrErr } = await getNextAvailableQR(amount);
             if (qrErr) throw new Error(qrErr);
-            if (data) setAssignedQR(data);
+            if (data) {
+                setAssignedQR(data);
+                hasFetchedQR.current = true;
+            }
         } catch (e: any) {
             console.error("QR Fetch Error:", e);
         } finally {

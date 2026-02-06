@@ -46,44 +46,48 @@ export async function resetQRUsage() {
 }
 
 export async function createTeam(name: string, leaderId: string | null, paymentMode: "INDIVIDUAL" | "BULK" = "INDIVIDUAL", maxMembers: number = 5) {
-    // Generate unique 6-digit code
-    const code = Math.random().toString(36).substring(2, 8).toUpperCase();
+    try {
+        // Generate unique 6-digit code
+        const code = Math.random().toString(36).substring(2, 8).toUpperCase();
 
-    const { data: team, error } = await supabase
-        .from("teams")
-        .insert([{
-            name: name.trim(),
-            unique_code: code,
-            leader_id: leaderId,
-            payment_mode: paymentMode,
-            max_members: maxMembers,
-            status: "PENDING"
-        }])
-        .select()
-        .single();
+        const { data: team, error } = await supabase
+            .from("teams")
+            .insert([{
+                name: name.trim(),
+                unique_code: code,
+                leader_id: leaderId,
+                payment_mode: paymentMode,
+                max_members: maxMembers,
+                status: "PENDING"
+            }])
+            .select()
+            .single();
 
-    if (error) {
-        if (error.code === '23505') {
-            const newCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-            const { data: retryTeam, error: retryErr } = await supabase
-                .from("teams")
-                .insert([{
-                    name: name.trim(),
-                    unique_code: newCode,
-                    leader_id: leaderId,
-                    payment_mode: paymentMode,
-                    max_members: maxMembers,
-                    status: "PENDING"
-                }])
-                .select()
-                .single();
-            if (retryErr) return { error: retryErr.message };
-            return { data: retryTeam };
+        if (error) {
+            if (error.code === '23505') {
+                const newCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+                const { data: retryTeam, error: retryErr } = await supabase
+                    .from("teams")
+                    .insert([{
+                        name: name.trim(),
+                        unique_code: newCode,
+                        leader_id: leaderId,
+                        payment_mode: paymentMode,
+                        max_members: maxMembers,
+                        status: "PENDING"
+                    }])
+                    .select()
+                    .single();
+                if (retryErr) return { error: retryErr.message };
+                return { data: retryTeam };
+            }
+            return { error: error.message };
         }
-        return { error: error.message };
-    }
 
-    return { data: team };
+        return { data: team };
+    } catch (err: any) {
+        return { error: err.message || "Failed to create team." };
+    }
 }
 
 export async function joinTeam(code: string) {
@@ -242,21 +246,25 @@ export async function purgeUnpaidUsers() {
 }
 
 export async function checkUserAvailability(email: string, phone: string) {
-    const { data, error } = await supabase
-        .from("users")
-        .select("id, status")
-        .or(`email.eq.${email.trim().toLowerCase()},phone.eq.${phone.trim()}`);
+    try {
+        const { data, error } = await supabase
+            .from("users")
+            .select("id, status")
+            .or(`email.eq.${email.trim().toLowerCase()},phone.eq.${phone.trim()}`);
 
-    if (error) return { error };
+        if (error) return { error: error.message };
 
-    const lockedStatuses = ["PENDING", "APPROVED", "VERIFYING"];
-    const conflict = data?.find(u => lockedStatuses.includes(u.status));
+        const lockedStatuses = ["PENDING", "APPROVED", "VERIFYING"];
+        const conflict = data?.find(u => lockedStatuses.includes(u.status));
 
-    if (conflict) {
-        return { error: "User already registered or payment pending." };
+        if (conflict) {
+            return { error: "User already registered or payment pending." };
+        }
+
+        return { data: true };
+    } catch (err: any) {
+        return { error: err.message || "Availability check failed." };
     }
-
-    return { data: true };
 }
 
 // 2. Submit Payment Details
