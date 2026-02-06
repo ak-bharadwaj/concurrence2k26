@@ -57,8 +57,7 @@ export async function createTeam(name: string, leaderId: string | null, paymentM
                 unique_code: code,
                 leader_id: leaderId,
                 payment_mode: paymentMode,
-                max_members: maxMembers,
-                status: "PENDING"
+                max_members: maxMembers
             }])
             .select()
             .single();
@@ -73,8 +72,7 @@ export async function createTeam(name: string, leaderId: string | null, paymentM
                         unique_code: newCode,
                         leader_id: leaderId,
                         payment_mode: paymentMode,
-                        max_members: maxMembers,
-                        status: "PENDING"
+                        max_members: maxMembers
                     }])
                     .select()
                     .single();
@@ -94,7 +92,7 @@ export async function joinTeam(code: string) {
     try {
         const { data: team, error } = await supabase
             .from("teams")
-            .select("*, leader:users!fk_team_leader(*)")
+            .select("id, name, unique_code, payment_mode, max_members, leader_id, leader:users!fk_team_leader(id, name, email, status)")
             .eq("unique_code", code.trim().toUpperCase())
             .maybeSingle();
 
@@ -283,7 +281,7 @@ export async function submitPayment(userId: string, paymentData: {
                 status: "PENDING"
             })
             .eq("id", userId)
-            .select("*, teams(*)")
+            .select("id, name, reg_no, email, phone, status, teams(id, name, unique_code, payment_mode)")
             .single();
 
         if (userErr) return { error: userErr.message };
@@ -323,13 +321,16 @@ export async function updateStatus(
             .update(updateData)
             .eq("id", userId)
             .neq("status", newStatus)
-            .select("*, teams!team_id(*)")
+            .select("id, name, email, reg_no, status, role, team_id, teams!team_id(id, name, payment_mode)")
             .single();
 
         if (error) return { error: error.message };
         if (!user) return { error: "User not found" };
 
-        if (newStatus === "APPROVED" && user.role === "LEADER" && user.teams?.payment_mode === "BULK" && user.team_id) {
+        const teamsData: any = user.teams;
+        const paymentMode = Array.isArray(teamsData) ? teamsData[0]?.payment_mode : teamsData?.payment_mode;
+
+        if (newStatus === "APPROVED" && user.role === "LEADER" && paymentMode === "BULK" && user.team_id) {
             await supabase
                 .from("users")
                 .update({ status: "APPROVED", verified_by: adminId })
@@ -356,7 +357,9 @@ export async function updateStatus(
                 EMAIL_TEMPLATES.PAYMENT_VERIFIED(user.name, qrUrl(user.id), user.reg_no, whatsappLink)
             );
 
-            if (user.role === "LEADER" && user.teams?.payment_mode === "BULK" && user.team_id) {
+            const tData: any = user.teams;
+            const pMode = Array.isArray(tData) ? tData[0]?.payment_mode : tData?.payment_mode;
+            if (user.role === "LEADER" && pMode === "BULK" && user.team_id) {
                 const { data: members } = await supabase
                     .from("users")
                     .select("*")
@@ -396,7 +399,7 @@ export async function approveTeamPayment(
     try {
         const { data: team, error: teamErr } = await supabase
             .from("teams")
-            .update({ status: "APPROVED" })
+            .update({}) // Status removed, column doesn't exist
             .eq("id", teamId)
             .select()
             .single();
@@ -737,7 +740,7 @@ export async function addMemberToTeam(memberData: any, teamId: string) {
             return { error: "This participant is already registered in another squad." };
         }
 
-        const { data: team } = await supabase.from("teams").select("*, users!leader_id(status)").eq("id", teamId).single();
+        const { data: team } = await supabase.from("teams").select("id, name, max_members, payment_mode, leader_id, users!leader_id(status, email, college)").eq("id", teamId).single();
         const { count } = await supabase.from("users").select("*", { count: 'exact', head: true }).eq("team_id", teamId);
 
         if (count !== null && count >= (team?.max_members || 5)) {
@@ -745,7 +748,9 @@ export async function addMemberToTeam(memberData: any, teamId: string) {
         }
 
         if (existingUser) {
-            const targetStatus = team?.payment_mode === "BULK" ? (team?.users?.status || "PENDING") : "UNPAID";
+            const usersData: any = team?.users;
+            const leaderStatus = Array.isArray(usersData) ? usersData[0]?.status : usersData?.status;
+            const targetStatus = team?.payment_mode === "BULK" ? (leaderStatus || "PENDING") : "UNPAID";
 
             const { error: uErr } = await supabase
                 .from("users")
@@ -761,8 +766,9 @@ export async function addMemberToTeam(memberData: any, teamId: string) {
 
             return { data: existingUser };
         } else {
-            const finalCollege = (college === 'OTHERS' && otherCollege) ? otherCollege : (college || team?.users?.college);
-            const targetStatus = team?.payment_mode === "BULK" ? (team?.users?.status || "PENDING") : "UNPAID";
+            const teamLeader = Array.isArray(team?.users) ? team?.users[0] : team?.users;
+            const finalCollege = (college === 'OTHERS' && otherCollege) ? otherCollege : (college || teamLeader?.college);
+            const targetStatus = team?.payment_mode === "BULK" ? (teamLeader?.status || "PENDING") : "UNPAID";
 
             const { data: newUser, error: iErr } = await supabase
                 .from("users")
