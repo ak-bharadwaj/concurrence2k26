@@ -7,7 +7,7 @@ export async function getAllSupportTickets() {
     try {
         const { data, error } = await supabase
             .from("support_tickets")
-            .select("*, users(name, email, reg_no)")
+            .select("*, users!user_id(name, email, reg_no)")
             .order("created_at", { ascending: false });
 
         if (error) return { error: error.message };

@@ -368,7 +368,7 @@ export default function MainDashboard() {
                 supabase.from("group_links").select("*").order("created_at", { ascending: false }),
                 supabase.from("action_logs").select("*, users!user_id(name), admins(username)").order("timestamp", { ascending: false }).limit(50),
                 supabase.from("teams").select("*"),
-                supabase.from("join_requests").select("*, teams(name, unique_code)").eq("status", "PENDING")
+                supabase.from("join_requests").select("*, teams!team_id(name, unique_code)").eq("status", "PENDING")
             ]);
 
             // Robust individual error checks
@@ -586,7 +586,8 @@ export default function MainDashboard() {
                     alert("User rejected and deleted.");
                 } else {
                     const user = data.users.find((u: any) => u.id === id);
-                    const link = value === 'APPROVED' ? await getActiveGroupLink(user?.college || "") : "";
+                    const linkRes = value === 'APPROVED' ? await getActiveGroupLink(user?.college || "") : { data: "" };
+                    const link = linkRes?.data || "";
                     await updateStatus(id, admin.id, value as any, "MANUAL_STATUS_OVERRIDE", link || "");
                 }
             } else {
@@ -619,7 +620,8 @@ export default function MainDashboard() {
             }));
 
             if (action === "APPROVED") {
-                const link = await getActiveGroupLink(user.college);
+                const linkRes = await getActiveGroupLink(user.college);
+                const link = linkRes?.data || "";
                 await updateStatus(user.id, admin.id, "APPROVED", "APPROVE_PAYMENT", link || "");
             } else if (action === "REJECTED") {
                 if (!window.confirm("Reject and DELETE this user?")) {
@@ -638,7 +640,8 @@ export default function MainDashboard() {
     const handleApproveMember = async (userId: string) => {
         try {
             const user = data.users.find((u: any) => u.id === userId);
-            const link = await getActiveGroupLink(user?.college || "");
+            const linkRes = await getActiveGroupLink(user?.college || "");
+            const link = linkRes?.data || "";
             await updateStatus(userId, admin.id, "APPROVED", "MANUAL_SINGLE_APPROVE", link || "");
             fetchAllData();
         } catch (err) {
@@ -660,7 +663,8 @@ export default function MainDashboard() {
                 await approveTeamPayment(verificationGroup.id, admin.id, paymentDetails);
             } else {
                 // Solo - just reuse standard approve
-                const link = await getActiveGroupLink(verificationGroup.members[0].college);
+                const linkRes = await getActiveGroupLink(verificationGroup.members[0].college);
+                const link = linkRes?.data || "";
                 await updateStatus(verificationGroup.members[0].id, admin.id, "APPROVED", "APPROVE_PAYMENT", link || "");
             }
 
@@ -900,7 +904,8 @@ export default function MainDashboard() {
     const handleAttendanceExport = async () => {
         try {
             setLoading(true);
-            const reportData = await fetchAttendanceReport(attendanceDate);
+            const reportResponse = await fetchAttendanceReport(attendanceDate);
+            const reportData = reportResponse?.data || [];
 
             if (!reportData || reportData.length === 0) {
                 alert("No attendance data found for this date.");
@@ -928,7 +933,7 @@ export default function MainDashboard() {
             });
 
             // Data Rows
-            reportData.forEach((row: any) => {
+            (reportData as any[]).forEach((row: any) => {
                 const sheetRow = sheet.addRow([
                     row.teams?.name || 'SOLO',
                     row.teams?.team_number || '---',

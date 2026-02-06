@@ -16,8 +16,8 @@ export default function SuccessPage() {
             try {
                 // For the success page, we'll try to get the user's college from local storage or context if available
                 // for now defaulting to RGM as it's the primary venue
-                const link = await getActiveGroupLink("RGM College");
-                if (link) setGroupLink(link);
+                const linkResponse = await getActiveGroupLink("RGM College");
+                if (linkResponse?.data) setGroupLink(linkResponse.data);
             } catch (err) {
                 // Silently fail if group link fetch fails
             }

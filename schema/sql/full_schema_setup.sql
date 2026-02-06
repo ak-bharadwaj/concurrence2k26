@@ -115,6 +115,7 @@ CREATE TABLE IF NOT EXISTS public.join_requests (
     id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
     team_id uuid REFERENCES public.teams(id) ON DELETE CASCADE,
     user_id uuid REFERENCES public.users(id) ON DELETE CASCADE,
+    candidate_data jsonb,
     status text DEFAULT 'PENDING', -- PENDING, APPROVED, REJECTED
     created_at timestamp with time zone DEFAULT timezone('utc'::text, now()) NOT NULL,
     UNIQUE(team_id, user_id)

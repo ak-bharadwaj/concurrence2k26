@@ -63,11 +63,12 @@ export default function AdminSupportPage() {
 
     const fetchTickets = async () => {
         try {
-            const data = await getAllSupportTickets();
-            setTickets(data || []);
-            setFilteredTickets(data || []);
+            const ticketsRes = await getAllSupportTickets();
+            const ticketsList = ticketsRes?.data || [];
+            setTickets(ticketsList);
+            setFilteredTickets(ticketsList);
         } catch (err: any) {
-            } finally {
+        } finally {
             setLoading(false);
         }
     };
@@ -128,8 +129,8 @@ export default function AdminSupportPage() {
                             key={f}
                             onClick={() => setFilter(f)}
                             className={`px-4 py-2 rounded-lg font-bold text-sm transition-all ${filter === f
-                                    ? 'bg-cyan-500 text-black'
-                                    : 'bg-white/5 text-white/60 hover:bg-white/10'
+                                ? 'bg-cyan-500 text-black'
+                                : 'bg-white/5 text-white/60 hover:bg-white/10'
                                 }`}
                         >
                             {f}
@@ -159,8 +160,8 @@ export default function AdminSupportPage() {
                                                     {ticket.issue_type}
                                                 </span>
                                                 <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase ${ticket.status === 'RESOLVED'
-                                                        ? 'bg-green-500/20 text-green-500'
-                                                        : 'bg-yellow-500/20 text-yellow-500'
+                                                    ? 'bg-green-500/20 text-green-500'
+                                                    : 'bg-yellow-500/20 text-yellow-500'
                                                     }`}>
                                                     {ticket.status}
                                                 </span>

@@ -1,0 +1,24 @@
+﻿app/(main)/dashboard/page.tsx(95,24): error TS2345: Argument of type '{ data: any[]; error?: undefined; } | { error: any; data?: undefined; }' is not assignable to parameter of type 'SetStateAction<any[]>'.
+  Type '{ data: any[]; error?: undefined; }' is not assignable to type 'SetStateAction<any[]>'.
+app/(main)/success/page.tsx(20,40): error TS2345: Argument of type '{ data: any; error?: undefined; } | { error: any; data?: undefined; }' is not assignable to parameter of type 'SetStateAction<string | null>'.
+  Type '{ data: any; error?: undefined; }' is not assignable to type 'SetStateAction<string | null>'.
+app/(main)/support/page.tsx(48,32): error TS2345: Argument of type '{ data: any[]; error?: undefined; } | { error: any; data?: undefined; }' is not assignable to parameter of type 'SetStateAction<any[]>'.
+  Type '{ data: any[]; error?: undefined; }' is not assignable to type 'SetStateAction<any[]>'.
+app/admin/main-dashboard/page.tsx(590,94): error TS2345: Argument of type '"" | { data: any; error?: undefined; } | { error: any; data?: undefined; }' is not assignable to parameter of type 'string | undefined'.
+  Type '{ data: any; error?: undefined; }' is not assignable to type 'string'.
+app/admin/main-dashboard/page.tsx(623,86): error TS2345: Argument of type '{ data: any; error?: undefined; } | { error: any; data?: undefined; }' is not assignable to parameter of type 'string | undefined'.
+  Type '{ data: any; error?: undefined; }' is not assignable to type 'string'.
+app/admin/main-dashboard/page.tsx(642,87): error TS2345: Argument of type '{ data: any; error?: undefined; } | { error: any; data?: undefined; }' is not assignable to parameter of type 'string | undefined'.
+  Type '{ data: any; error?: undefined; }' is not assignable to type 'string'.
+app/admin/main-dashboard/page.tsx(664,110): error TS2345: Argument of type '{ data: any; error?: undefined; } | { error: any; data?: undefined; }' is not assignable to parameter of type 'string | undefined'.
+  Type '{ data: any; error?: undefined; }' is not assignable to type 'string'.
+app/admin/main-dashboard/page.tsx(905,43): error TS2339: Property 'length' does not exist on type '{ data: { attendanceStatus: string; id: any; name: any; reg_no: any; status: any; team_id: any; teams: { name: any; team_number: any; }[]; }[]; error?: undefined; } | { error: any; data?: undefined; }'.
+  Property 'length' does not exist on type '{ data: { attendanceStatus: string; id: any; name: any; reg_no: any; status: any; team_id: any; teams: { name: any; team_number: any; }[]; }[]; error?: undefined; }'.
+app/admin/main-dashboard/page.tsx(931,24): error TS2339: Property 'forEach' does not exist on type '{ data: { attendanceStatus: string; id: any; name: any; reg_no: any; status: any; team_id: any; teams: { name: any; team_number: any; }[]; }[]; error?: undefined; } | { error: any; data?: undefined; }'.
+  Property 'forEach' does not exist on type '{ data: { attendanceStatus: string; id: any; name: any; reg_no: any; status: any; team_id: any; teams: { name: any; team_number: any; }[]; }[]; error?: undefined; }'.
+app/admin/sub-dashboard/page.tsx(105,86): error TS2345: Argument of type '{ data: any; error?: undefined; } | { error: any; data?: undefined; }' is not assignable to parameter of type 'string | undefined'.
+  Type '{ data: any; error?: undefined; }' is not assignable to type 'string'.
+app/admin/support/page.tsx(67,24): error TS2345: Argument of type '{ data: any[]; error?: undefined; } | { error: any; data?: undefined; }' is not assignable to parameter of type 'SetStateAction<any[]>'.
+  Type '{ data: any[]; error?: undefined; }' is not assignable to type 'SetStateAction<any[]>'.
+app/admin/support/page.tsx(68,32): error TS2345: Argument of type '{ data: any[]; error?: undefined; } | { error: any; data?: undefined; }' is not assignable to parameter of type 'SetStateAction<any[]>'.
+  Type '{ data: any[]; error?: undefined; }' is not assignable to type 'SetStateAction<any[]>'.

@@ -92,7 +92,7 @@ export async function joinTeam(code: string) {
     try {
         const { data: team, error } = await supabase
             .from("teams")
-            .select("id, name, unique_code, payment_mode, max_members, leader_id, leader:users!fk_team_leader(id, name, email, status)")
+            .select("id, name, unique_code, payment_mode, max_members, leader_id, members:users!team_id(id), leader:users!leader_id(id, name, email, status)")
             .eq("unique_code", code.trim().toUpperCase())
             .maybeSingle();
 
@@ -111,7 +111,7 @@ export async function getTeamDetails(teamId: string) {
             .from("teams")
             .select(`
                 *,
-                members:users(*)
+                members:users!team_id(*)
             `)
             .eq("id", teamId)
             .single();
@@ -281,7 +281,7 @@ export async function submitPayment(userId: string, paymentData: {
                 status: "PENDING"
             })
             .eq("id", userId)
-            .select("id, name, reg_no, email, phone, status, teams(id, name, unique_code, payment_mode)")
+            .select("id, name, reg_no, email, phone, status, teams!team_id(id, name, unique_code, payment_mode)")
             .single();
 
         if (userErr) return { error: userErr.message };
@@ -467,16 +467,29 @@ export async function deleteUser(userId: string) {
 export async function requestJoinTeam(teamId: string, userId: string | null, candidateData?: any) {
     try {
         const insertData: any = { team_id: teamId, status: 'PENDING' };
-        if (userId) insertData.user_id = userId;
-        if (candidateData) insertData.candidate_data = candidateData;
+        if (userId) {
+            insertData.user_id = userId;
+        } else if (candidateData) {
+            insertData.candidate_data = candidateData;
+        }
+
+        // Handle conflict differently for anonymous vs logged in
+        // If logged in, conflict is on team_id, user_id
+        // If anonymous, we don't have a strict unique constraint on candidate_data -> email yet 
+        // but we can try to upsert based on team_id and candidate_data->>email for anonymous
 
         const { data, error } = await supabase
             .from("join_requests")
-            .upsert(insertData, { onConflict: 'team_id,user_id' })
+            .upsert(insertData, {
+                onConflict: userId ? 'team_id,user_id' : undefined // Let DB handle anonymous or use policy
+            })
             .select()
             .single();
 
-        if (error) return { error: `DB Error: ${error.message} (Payload: ${JSON.stringify(insertData)})` };
+        if (error) {
+            console.error("requestJoinTeam Error:", error);
+            return { error: `DB Error: ${error.message}` };
+        }
         return { data };
     } catch (err: any) {
         return { error: err.message };
@@ -489,16 +502,18 @@ export async function getJoinRequests(teamId: string, status: 'PENDING' | 'ACCEP
             .from("join_requests")
             .select(`
                 *,
-                users:user_id (
+                users:users!user_id (
                     name,
                     reg_no,
                     college,
                     email,
-                    phone
+                    phone,
+                    status
                 )
             `)
             .eq("team_id", teamId)
-            .eq("status", status);
+            .eq("status", status)
+            .order("created_at", { ascending: false });
 
         if (error) {
             console.error("Error fetching join requests:", error);
@@ -506,11 +521,16 @@ export async function getJoinRequests(teamId: string, status: 'PENDING' | 'ACCEP
         }
 
         const formattedData = (data || []).map(req => {
-            const userData = req.user_id ? (Array.isArray(req.users) ? req.users[0] : req.users) : req.candidate_data;
+            // Priority: user record, then candidate_data
+            const source = req.user_id ? (Array.isArray(req.users) ? req.users[0] : req.users) : req.candidate_data;
             return {
                 ...req,
-                users: userData,
-                user: userData
+                name: source?.name || req.candidate_data?.name || "Unknown Warrior",
+                email: source?.email || req.candidate_data?.email || "---",
+                reg_no: source?.reg_no || req.candidate_data?.reg_no || "---",
+                college: source?.college || req.candidate_data?.college || "---",
+                phone: source?.phone || req.candidate_data?.phone || "---",
+                user_status: source?.status || "PENDING"
             };
         });
 
@@ -584,8 +604,8 @@ export async function respondToJoinRequest(requestId: string, status: 'ACCEPTED'
 
         if (updateErr) return { error: updateErr.message };
 
-        const targetEmail = request.users?.email || request.candidate_data?.email;
-        const targetName = request.users?.name || request.candidate_data?.name || "Warrior";
+        const targetEmail = (request.users && !Array.isArray(request.users) ? request.users.email : null) || request.candidate_data?.email;
+        const targetName = (request.users && !Array.isArray(request.users) ? request.users.name : null) || request.candidate_data?.name || "Warrior";
 
         if (targetEmail) {
             if (status === 'ACCEPTED') {

@@ -14,8 +14,6 @@ export default function TeamPage() {
     const [team, setTeam] = useState<any>(null);
     const [isCreatingFirstSquad, setIsCreatingFirstSquad] = useState(false);
     const [members, setMembers] = useState<any[]>([]);
-    const [joinRequests, setJoinRequests] = useState<any[]>([]);
-    const [acceptedRequests, setAcceptedRequests] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [copied, setCopied] = useState(false);
@@ -34,6 +32,7 @@ export default function TeamPage() {
     const [paymentProof, setPaymentProof] = useState<{ transaction_id: string; screenshot: File | null }>({ transaction_id: "", screenshot: null });
     const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
     const [paymentAmount, setPaymentAmount] = useState(800);
+    const [loadingMessage, setLoadingMessage] = useState("");
     const router = useRouter();
 
     const fetchTeamData = useCallback(async (silent: boolean = false) => {
@@ -66,16 +65,11 @@ export default function TeamPage() {
                 return;
             }
 
-            // Parallelize fetching for Team, Members, and Requests (if leader)
+            // Parallelize fetching for Team and Members
             const promises: any[] = [
                 supabase.from("teams").select("*").eq("id", userData.team_id).single(),
                 supabase.from("users").select("id, name, reg_no, role, status, email").eq("team_id", userData.team_id).order("role", { ascending: false })
             ];
-
-            if (userData.role === "LEADER") {
-                promises.push(getJoinRequests(userData.team_id, 'PENDING'));
-                promises.push(getJoinRequests(userData.team_id, 'ACCEPTED'));
-            }
 
             // Execute all queries concurrently
             const results = await Promise.all(promises);
@@ -85,11 +79,6 @@ export default function TeamPage() {
             if (teamRes.error) throw teamRes.error;
             setTeam(teamRes.data);
             setMembers(membersRes.data || []);
-
-            if (userData.role === "LEADER") {
-                setJoinRequests(results[2] || []);
-                setAcceptedRequests(results[3] || []);
-            }
         } catch (err: any) {
             setError(getFriendlyError(err));
         } finally {
@@ -150,18 +139,6 @@ export default function TeamPage() {
         navigator.clipboard.writeText(team.unique_code);
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
-    };
-
-    const handleJoinRequest = async (requestId: string, action: 'ACCEPTED' | 'REJECTED') => {
-        try {
-            setProcessingId(requestId);
-            await respondToJoinRequest(requestId, action);
-            await fetchTeamData();
-        } catch (err: any) {
-            alert(getFriendlyError(err));
-        } finally {
-            setProcessingId(null);
-        }
     };
 
     const handleRemoveMember = async (memberId: string, memberName: string) => {
@@ -324,6 +301,7 @@ export default function TeamPage() {
 
         try {
             setIsSubmittingPayment(true);
+            setLoadingMessage("Uploading specialized transmission proof...");
 
             // 1. Upload screenshot
             const fileExt = paymentProof.screenshot.name.split('.').pop();
@@ -334,11 +312,13 @@ export default function TeamPage() {
 
             if (uploadErr) throw uploadErr;
 
+            setLoadingMessage("Encrypting transaction signals...");
             const { data: { publicUrl } } = supabase.storage
                 .from('screenshots')
                 .getPublicUrl(uploadData?.path || fileName);
 
             // 2. Submit payment action
+            setLoadingMessage("Finalizing secure gateway entry...");
             await submitPayment(user.id, {
                 transaction_id: paymentProof.transaction_id,
                 screenshot_url: publicUrl,
@@ -353,6 +333,7 @@ export default function TeamPage() {
             alert(getFriendlyError(err));
         } finally {
             setIsSubmittingPayment(false);
+            setLoadingMessage("");
         }
     };
 
@@ -489,7 +470,7 @@ export default function TeamPage() {
 
                 {/* Join Requests & Add Member (Leader Only) */}
                 {(isLeader && !isCreatingFirstSquad) && (
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+                    <div className="grid grid-cols-1 lg:grid-cols-1 gap-6 mb-6">
                         {/* Add Member Manually */}
                         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="glass-card p-6 border-cyan-500/20">
                             <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
@@ -516,69 +497,6 @@ export default function TeamPage() {
                             {members.length >= team.max_members && (
                                 <p className="text-[10px] text-red-500 font-bold uppercase text-center mt-3">Your squad has reached its limit</p>
                             )}
-                        </motion.div>
-
-                        {/* Public Requests */}
-                        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="glass-card p-6">
-                            <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
-                                <UserPlus className="w-5 h-5 text-purple-400" />
-                                Join Requests ({joinRequests.length})
-                            </h3>
-
-                            <div className="max-h-[250px] overflow-y-auto scrollbar-hide space-y-3">
-                                {joinRequests.map((req: any) => (
-                                    <div key={req.id} className="flex flex-col gap-3 p-4 bg-white/5 rounded-2xl border border-white/10">
-                                        <div className="flex items-start justify-between gap-4">
-                                            <div>
-                                                <p className="font-bold text-sm">{req.users?.name || "Unknown Warrior"}</p>
-                                                <p className="text-[10px] text-white/40 uppercase font-mono tracking-tighter">{req.users?.reg_no || "---"} • {req.users?.college || "N/A"}</p>
-                                            </div>
-                                            <div className="flex gap-2">
-                                                <button
-                                                    onClick={() => handleJoinRequest(req.id, 'ACCEPTED')}
-                                                    disabled={processingId === req.id}
-                                                    className="p-2 bg-green-500/10 text-green-500 rounded-lg hover:bg-green-500 hover:text-white transition-all disabled:opacity-50"
-                                                >
-                                                    <Check className="w-4 h-4" />
-                                                </button>
-                                                <button
-                                                    onClick={() => handleJoinRequest(req.id, 'REJECTED')}
-                                                    disabled={processingId === req.id}
-                                                    className="p-2 bg-red-500/10 text-red-500 rounded-lg hover:bg-red-500 hover:text-white transition-all disabled:opacity-50"
-                                                >
-                                                    <X className="w-4 h-4" />
-                                                </button>
-                                            </div>
-                                        </div>
-                                        <div className="flex flex-wrap gap-2 pt-2 border-t border-white/5">
-                                            <div className="flex items-center gap-1.5 text-[9px] text-white/40 bg-black/20 px-2 py-1 rounded-md border border-white/5">
-                                                <Mail className="w-3 h-3 text-cyan-400" />
-                                                {req.users?.email || "---"}
-                                            </div>
-                                            <div className="flex items-center gap-1.5 text-[9px] text-white/40 bg-black/20 px-2 py-1 rounded-md border border-white/5">
-                                                <Phone className="w-3 h-3 text-cyan-400" />
-                                                {req.users?.phone || "---"}
-                                            </div>
-                                        </div>
-                                    </div>
-                                ))}
-
-                                {acceptedRequests.map((req: any) => (
-                                    <div key={req.id} className="flex items-center justify-between p-4 bg-green-500/5 rounded-xl border border-green-500/20">
-                                        <div>
-                                            <p className="font-bold text-sm text-green-400">{req.users?.name || "Accepted Warrior"}</p>
-                                            <p className="text-[9px] text-green-500/40 uppercase font-bold tracking-tighter italic">Accepted - Awaiting Payment</p>
-                                        </div>
-                                        <Clock className="w-4 h-4 text-green-500/40 animate-pulse" />
-                                    </div>
-                                ))}
-
-                                {joinRequests.length === 0 && acceptedRequests.length === 0 && (
-                                    <div className="h-full flex items-center justify-center text-white/20 text-[10px] uppercase font-bold tracking-widest italic pt-4">
-                                        No active requests
-                                    </div>
-                                )}
-                            </div>
                         </motion.div>
                     </div>
                 )}
@@ -742,48 +660,6 @@ export default function TeamPage() {
                                 </button>
                             </form>
                         </div>
-
-                        <div className="text-center font-black text-white/20 uppercase tracking-[0.5em] text-xs">OR</div>
-
-                        <div className="glass-card p-10 text-center border-purple-500/30">
-                            <Users className="w-12 h-12 text-purple-400 mx-auto mb-4" />
-                            <h3 className="text-xl font-black uppercase italic mb-2 tracking-tighter text-purple-400">Join Existing Squad</h3>
-                            <p className="text-white/40 text-xs mb-8">Sync with an established unit via their unique 6-digit squad code.</p>
-
-                            <div className="max-w-sm mx-auto">
-                                <div className="flex gap-2">
-                                    <input
-                                        value={newMemberRegNo} // Reusing this state for the search code
-                                        onChange={e => setNewMemberRegNo(e.target.value.toUpperCase())}
-                                        className="flex-1 bg-white/5 border border-white/10 rounded-2xl px-4 py-3 outline-none focus:border-purple-500 text-center font-mono tracking-widest text-xl h-14"
-                                        maxLength={6}
-                                        placeholder="XYZ123"
-                                    />
-                                    <button
-                                        onClick={async () => {
-                                            if (!newMemberRegNo) return;
-                                            try {
-                                                setLoading(true);
-                                                const { data: teamResult, error: joinErr } = await joinTeam(newMemberRegNo);
-                                                if (joinErr) throw new Error(joinErr);
-                                                if (confirm(`Squad "${teamResult.name}" found. Send join request?`)) {
-                                                    await requestJoinTeam(teamResult.id, user.id);
-                                                    alert("Signal sent to Captain! Await approval on your dashboard.");
-                                                    router.push("/dashboard");
-                                                }
-                                            } catch (err: any) {
-                                                alert(getFriendlyError(err));
-                                            } finally {
-                                                setLoading(false);
-                                            }
-                                        }}
-                                        className="w-14 h-14 bg-purple-500 rounded-2xl flex items-center justify-center font-bold text-black border border-white/10"
-                                    >
-                                        <Search className="w-6 h-6" />
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
                     </div>
                 ) : isLeader ? (
                     <div className="glass-card p-6 border-red-500/20 bg-red-500/5 mt-8">
@@ -890,130 +766,124 @@ export default function TeamPage() {
                             initial={{ scale: 0.9, opacity: 0 }}
                             animate={{ scale: 1, opacity: 1 }}
                             exit={{ scale: 0.9, opacity: 0 }}
-                            className="bg-neutral-900 border border-white/10 rounded-3xl p-8 max-w-lg w-full shadow-2xl space-y-6"
+                            className="bg-neutral-900 border border-white/10 rounded-3xl p-6 sm:p-8 max-w-lg w-full shadow-2xl space-y-4 max-h-[90vh] flex flex-col"
                         >
-                            <div className="flex items-center justify-between">
+                            <div className="flex items-center justify-between shrink-0">
                                 <h2 className="text-xl font-black text-white uppercase italic">Enroll New Squad Member</h2>
                                 <button onClick={() => setShowAddMemberModal(false)}><X className="w-6 h-6 text-white/40" /></button>
                             </div>
 
-                            <form onSubmit={handleAddMemberByRegNo} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div className="space-y-2">
-                                    <label className="text-[10px] font-black uppercase text-white/30">Registration ID</label>
-                                    <input
-                                        required
-                                        value={newMemberData.reg_no}
-                                        onChange={(e) => setNewMemberData({ ...newMemberData, reg_no: e.target.value.toUpperCase() })}
-                                        placeholder="REQUIRED"
-                                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 outline-none focus:border-cyan-500/30 transition-all font-mono"
-                                    />
-                                </div>
-                                <div className="space-y-2">
-                                    <label className="text-[10px] font-black uppercase text-white/30">Full Name</label>
-                                    <input
-                                        required
-                                        value={newMemberData.name}
-                                        onChange={(e) => setNewMemberData({ ...newMemberData, name: e.target.value })}
-                                        placeholder="REQUIRED"
-                                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 outline-none focus:border-cyan-500/30 transition-all"
-                                    />
-                                </div>
-                                <div className="space-y-2">
-                                    <label className="text-[10px] font-black uppercase text-white/30">Email Address</label>
-                                    <input
-                                        required
-                                        type="email"
-                                        value={newMemberData.email}
-                                        onChange={(e) => setNewMemberData({ ...newMemberData, email: e.target.value })}
-                                        placeholder="REQUIRED"
-                                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 outline-none focus:border-cyan-500/30 transition-all"
-                                    />
-                                </div>
-                                <div className="space-y-2">
-                                    <label className="text-[10px] font-black uppercase text-white/30">Phone (Optional)</label>
-                                    <input
-                                        value={newMemberData.phone}
-                                        onChange={(e) => setNewMemberData({ ...newMemberData, phone: e.target.value })}
-                                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 outline-none focus:border-cyan-500/30 transition-all"
-                                    />
-                                </div>
-
-                                <div className="space-y-2">
-                                    <label className="text-[10px] font-black uppercase text-white/30">College</label>
-                                    <select
-                                        value={newMemberData.college}
-                                        onChange={(e) => setNewMemberData({ ...newMemberData, college: e.target.value })}
-                                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 outline-none focus:border-cyan-500/30 transition-all text-sm"
-                                    >
-                                        <option value="RGM" className="bg-neutral-900">RGM</option>
-                                        <option value="OTHERS" className="bg-neutral-900">Others</option>
-                                    </select>
-                                </div>
-
-                                <div className="space-y-2">
-                                    <label className="text-[10px] font-black uppercase text-white/30">Year</label>
-                                    <select
-                                        required
-                                        value={newMemberData.year}
-                                        onChange={(e) => setNewMemberData({ ...newMemberData, year: e.target.value })}
-                                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 outline-none focus:border-cyan-500/30 transition-all text-sm"
-                                    >
-                                        <option value="" className="bg-neutral-900">Select Year</option>
-                                        {["I", "II", "III", "IV"].map(y => <option key={y} value={y} className="bg-neutral-900">{y}</option>)}
-                                    </select>
-                                </div>
-
-                                <div className="space-y-2 md:col-span-1">
-                                    <label className="text-[10px] font-black uppercase text-white/30">Branch</label>
-                                    <select
-                                        required
-                                        value={newMemberData.branch}
-                                        onChange={(e) => setNewMemberData({ ...newMemberData, branch: e.target.value })}
-                                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 outline-none focus:border-cyan-500/30 transition-all text-sm"
-                                    >
-                                        <option value="" className="bg-neutral-900">Select Branch</option>
-                                        {["CSE", "CSE-AIML", "CSE-DS", "CSE-BS", "EEE", "ECE", "MECH", "CIVIL", "OTHERS"].map(b => (
-                                            <option key={b} value={b} className="bg-neutral-900">{b}</option>
-                                        ))}
-                                    </select>
-                                </div>
-
-                                {newMemberData.college === "OTHERS" && (
-                                    <div className="md:col-span-2 space-y-2">
-                                        <label className="text-[10px] font-black uppercase text-white/30">College Name</label>
+                            <form onSubmit={handleAddMemberByRegNo} className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pb-4">
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-black uppercase text-white/30">Registration ID</label>
                                         <input
                                             required
-                                            value={newMemberData.other_college}
-                                            onChange={(e) => setNewMemberData({ ...newMemberData, other_college: e.target.value })}
-                                            placeholder="Enter your college name"
+                                            value={newMemberData.reg_no}
+                                            onChange={(e) => setNewMemberData({ ...newMemberData, reg_no: e.target.value.toUpperCase() })}
+                                            placeholder="REQUIRED"
+                                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 outline-none focus:border-cyan-500/30 transition-all font-mono"
+                                        />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-black uppercase text-white/30">Full Name</label>
+                                        <input
+                                            required
+                                            value={newMemberData.name}
+                                            onChange={(e) => setNewMemberData({ ...newMemberData, name: e.target.value })}
+                                            placeholder="REQUIRED"
                                             className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 outline-none focus:border-cyan-500/30 transition-all"
                                         />
                                     </div>
-                                )}
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-black uppercase text-white/30">Email Address</label>
+                                        <input
+                                            required
+                                            type="email"
+                                            value={newMemberData.email}
+                                            onChange={(e) => setNewMemberData({ ...newMemberData, email: e.target.value })}
+                                            placeholder="REQUIRED"
+                                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 outline-none focus:border-cyan-500/30 transition-all"
+                                        />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-black uppercase text-white/30">Phone (Optional)</label>
+                                        <input
+                                            value={newMemberData.phone}
+                                            onChange={(e) => setNewMemberData({ ...newMemberData, phone: e.target.value })}
+                                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 outline-none focus:border-cyan-500/30 transition-all"
+                                        />
+                                    </div>
 
-                                <div className="md:col-span-2 space-y-2">
-                                    <label className="text-[10px] font-black uppercase text-white/30">Branch</label>
-                                    <select
-                                        required
-                                        value={newMemberData.branch}
-                                        onChange={(e) => setNewMemberData({ ...newMemberData, branch: e.target.value })}
-                                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 outline-none focus:border-cyan-500/30 transition-all text-sm"
-                                    >
-                                        <option value="" className="bg-neutral-900">Select Branch</option>
-                                        {["CSE", "CSE-AIML", "CSE-DS", "CSE-BS", "EEE", "ECE", "MECH", "CIVIL", "OTHERS"].map(b => (
-                                            <option key={b} value={b} className="bg-neutral-900">{b}</option>
-                                        ))}
-                                    </select>
-                                </div>
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-black uppercase text-white/30">College</label>
+                                        <select
+                                            value={newMemberData.college}
+                                            onChange={(e) => setNewMemberData({ ...newMemberData, college: e.target.value })}
+                                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 outline-none focus:border-cyan-500/30 transition-all text-sm"
+                                        >
+                                            <option value="RGM" className="bg-neutral-900">RGM</option>
+                                            <option value="OTHERS" className="bg-neutral-900">Others</option>
+                                        </select>
+                                    </div>
 
-                                <div className="md:col-span-2 pt-4">
-                                    <button
-                                        type="submit"
-                                        disabled={isAddingMember}
-                                        className="w-full py-4 bg-cyan-500 text-black font-black rounded-xl text-xs uppercase hover:bg-cyan-400 transition-all flex items-center justify-center gap-2"
-                                    >
-                                        {isAddingMember ? <Loader2 className="w-5 h-5 animate-spin" /> : <><UserPlus className="w-4 h-4" /> Deploy Member</>}
-                                    </button>
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-black uppercase text-white/30">Year</label>
+                                        <select
+                                            required
+                                            value={newMemberData.year}
+                                            onChange={(e) => setNewMemberData({ ...newMemberData, year: e.target.value })}
+                                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 outline-none focus:border-cyan-500/30 transition-all text-sm"
+                                        >
+                                            <option value="" className="bg-neutral-900">Select Year</option>
+                                            {["I", "II", "III", "IV"].map(y => <option key={y} value={y} className="bg-neutral-900">{y}</option>)}
+                                        </select>
+                                    </div>
+
+                                    <div className="space-y-2 md:col-span-1">
+                                        <label className="text-[10px] font-black uppercase text-white/30">Branch</label>
+                                        <select
+                                            required
+                                            value={newMemberData.branch}
+                                            onChange={(e) => setNewMemberData({ ...newMemberData, branch: e.target.value })}
+                                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 outline-none focus:border-cyan-500/30 transition-all text-sm"
+                                        >
+                                            <option value="" className="bg-neutral-900">Select Branch</option>
+                                            {["CSE", "CSE-AIML", "CSE-DS", "CSE-BS", "EEE", "ECE", "MECH", "CIVIL", "OTHERS"].map(b => (
+                                                <option key={b} value={b} className="bg-neutral-900">{b}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+
+                                    {newMemberData.college === "OTHERS" && (
+                                        <div className="md:col-span-2 space-y-2">
+                                            <label className="text-[10px] font-black uppercase text-white/30">College Name</label>
+                                            <input
+                                                required
+                                                value={newMemberData.other_college}
+                                                onChange={(e) => setNewMemberData({ ...newMemberData, other_college: e.target.value })}
+                                                placeholder="Enter your college name"
+                                                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 outline-none focus:border-cyan-500/30 transition-all"
+                                            />
+                                        </div>
+                                    )}
+
+                                    <div className="md:col-span-2 pt-4">
+                                        <button
+                                            type="submit"
+                                            disabled={isAddingMember}
+                                            className="w-full py-4 bg-cyan-500 text-black font-black rounded-xl text-xs uppercase hover:bg-cyan-400 transition-all flex flex-col items-center justify-center gap-1 shadow-lg disabled:opacity-50"
+                                        >
+                                            {isAddingMember ? (
+                                                <>
+                                                    <Loader2 className="w-5 h-5 animate-spin" />
+                                                    <span className="text-[8px] animate-pulse">Syncing Warrior Database...</span>
+                                                </>
+                                            ) : (
+                                                <><UserPlus className="w-4 h-4" /> Deploy Member</>
+                                            )}
+                                        </button>
+                                    </div>
                                 </div>
                             </form>
                         </motion.div>
@@ -1184,10 +1054,13 @@ export default function TeamPage() {
                                 <button
                                     onClick={handlePaymentSubmit}
                                     disabled={isSubmittingPayment}
-                                    className="w-full py-5 bg-gradient-to-r from-green-600 to-cyan-600 text-black font-black uppercase tracking-widest rounded-2xl disabled:opacity-50 active:scale-[0.98] transition-all flex items-center justify-center gap-3 shadow-[0_0_30px_rgba(34,197,94,0.2)]"
+                                    className="w-full py-5 bg-gradient-to-r from-green-600 to-cyan-600 text-black font-black uppercase tracking-widest rounded-2xl disabled:opacity-50 active:scale-[0.98] transition-all flex flex-col items-center justify-center gap-1 shadow-[0_0_30px_rgba(34,197,94,0.2)]"
                                 >
                                     {isSubmittingPayment ? (
-                                        <><Loader2 className="w-5 h-5 animate-spin" /> Finalizing Entry...</>
+                                        <>
+                                            <Loader2 className="w-5 h-5 animate-spin" />
+                                            <span className="text-[10px] font-bold opacity-80">{loadingMessage || "Finalizing Entry..."}</span>
+                                        </>
                                     ) : (
                                         <><ShieldCheck className="w-5 h-5" /> Encrypt & Submit Proof</>
                                     )}

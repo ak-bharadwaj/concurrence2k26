@@ -41,6 +41,7 @@ import {
     createTicket,
     requestJoinTeam,
     getJoinRequests,
+    getUserJoinRequest,
     respondToJoinRequest,
     registerBulkMembers,
     checkUserAvailability,
@@ -104,8 +105,7 @@ function RegisterPageContent() {
     const [searchCode, setSearchCode] = useState("");
     const [searchedTeam, setSearchedTeam] = useState<any>(null);
     const [acceptedTerms, setAcceptedTerms] = useState(false);
-    const [joinRequestSent, setJoinRequestSent] = useState(false);
-    const [joinRequestStatus, setJoinRequestStatus] = useState<'NONE' | 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'COMPLETED'>('NONE');
+    const [loadingMessage, setLoadingMessage] = useState("");
 
     // Payment Info
     const [assignedQR, setAssignedQR] = useState<any>(null);
@@ -144,6 +144,56 @@ function RegisterPageContent() {
     const totalAmount = regMode === "SOLO" ? 800 : (
         (teamDetails?.members?.length || 1) + additionalMembers.length
     ) * 800;
+
+    // --- Session Restoration ---
+    useEffect(() => {
+        const sessionCookie = document.cookie.split(';').find(c => c.trim().startsWith('student_session='));
+        const existingUserId = sessionCookie?.split('=')[1];
+
+        if (existingUserId) {
+            setUserId(existingUserId);
+            setLoading(true);
+
+            // Fetch User Data
+            supabase.from("users").select("*").eq("id", existingUserId).single().then(async ({ data: userData, error: uErr }) => {
+                if (uErr || !userData) {
+                    setLoading(false);
+                    return;
+                }
+
+                // Populate Form Data
+                setFormData({
+                    name: userData.name || "",
+                    email: userData.email || "",
+                    phone: userData.phone || "",
+                    reg_no: userData.reg_no || "",
+                    college: userData.college || "RGM",
+                    otherCollege: userData.college !== "RGM" ? userData.college : "",
+                    branch: userData.branch || "",
+                    year: userData.year || "I",
+                    tshirtSize: userData.tshirt_size || "M"
+                });
+
+                setRegMode(userData.team_id ? "SQUAD" : "SOLO");
+                if (userData.team_id) {
+                    setSquadSubMode(userData.role === "LEADER" ? "FORM" : "JOIN");
+                    const { data: team } = await getTeamDetails(userData.team_id);
+                    if (team) setTeamDetails(team);
+                    setUserRole(userData.role);
+
+                    // If member and unpaid, go to payment? No, wait for leader if BULK
+                    // But for simplicity, let's just move to step 4 (Legion Hub)
+                    setStep(4);
+                } else if (userData.status === "UNPAID") {
+                    // Solo user who hasn't paid yet
+                    setStep(5);
+                } else if (userData.status === "APPROVED") {
+                    router.push("/success");
+                }
+                setLoading(false);
+            });
+        }
+    }, [router]);
 
     // --- Handlers ---
 
@@ -196,32 +246,7 @@ function RegisterPageContent() {
             userSub.unsubscribe();
             teamSub.unsubscribe();
         };
-    }, [userId, regMode]); // Removed step, teamDetails, router to prevent redundant subs
-
-    // 3. SPECIAL LISTENER FOR ANONYMOUS JOINERS
-    useEffect(() => {
-        if (regMode !== 'SQUAD' || squadSubMode !== 'JOIN' || !searchedTeam?.id || userId) return;
-
-        const requestSub = supabase
-            .channel('anonymous_join_sync')
-            .on('postgres_changes', {
-                event: 'UPDATE',
-                schema: 'public',
-                table: 'join_requests',
-                filter: `team_id=eq.${searchedTeam.id}`
-            }, (payload) => {
-                const isMatch = payload.new.candidate_data?.email === formData.email;
-                if (isMatch) {
-                    setJoinRequestStatus(payload.new.status);
-                    if (payload.new.status === 'ACCEPTED') {
-                        setStep(5);
-                    }
-                }
-            })
-            .subscribe();
-
-        return () => { requestSub.unsubscribe(); };
-    }, [regMode, squadSubMode, searchedTeam?.id, userId, formData.email]);
+    }, [userId, regMode]);
 
     // Leader: Listen for Team Member Updates (Real-time Squad Sync)
     useEffect(() => {
@@ -322,9 +347,15 @@ function RegisterPageContent() {
                     });
                     setStep(4);
                 } else if (squadSubMode === "JOIN") {
-                    // ZERO-LEAK: Don't register yet. Just send Join Request with candidate data.
-                    const success = await handleJoinRequest(undefined);
-                    if (success) setStep(4);
+                    // SIMPLIFIED JOIN: Just validate availability and proceed to review
+                    const { error: availErr } = await checkUserAvailability(userParams.email, userParams.phone);
+                    if (availErr) {
+                        setError(getFriendlyError(availErr));
+                        return;
+                    }
+                    // Set final amount for single joiner
+                    setFinalAmount(800);
+                    setStep(5); // Go directly to review
                 }
             } else {
                 // SOLO MODE: STRICT ZERO-LEAK
@@ -353,11 +384,23 @@ function RegisterPageContent() {
     const handleSearchTeam = async () => {
         try {
             setLoading(true);
+            setError(null);
             const { data: team, error: searchErr } = await joinTeam(searchCode);
-            if (searchErr) {
-                setError(getFriendlyError(searchErr));
+            if (searchErr || !team) {
+                setError(searchErr ? getFriendlyError(searchErr) : "Squad not found");
                 return;
             }
+
+            // Check team capacity
+            const currentMembers = (team as any).members?.length || 0;
+            const maxMembers = team.max_members || 5;
+
+            if (currentMembers >= maxMembers) {
+                setError(`Team "${team.name}" is full (${currentMembers}/${maxMembers} members)`);
+                setSearchedTeam(null);
+                return;
+            }
+
             setSearchedTeam(team);
         } catch (err: any) { setError(getFriendlyError(err)); } finally { setLoading(false); }
     };
@@ -433,23 +476,7 @@ function RegisterPageContent() {
 
 
 
-    const handleJoinRequest = async (overrideId?: string) => {
-        try {
-            if (!searchedTeam?.id) throw new Error("No squad selected. Please go back and find a squad.");
-            setLoading(true);
-            const { error: joinErr } = await requestJoinTeam(searchedTeam.id, overrideId || userId, formData);
-            if (joinErr) throw new Error(joinErr);
 
-            setJoinRequestSent(true);
-            setJoinRequestStatus('PENDING');
-            return true;
-        } catch (err: any) {
-            setError(getFriendlyError(err));
-            return false;
-        } finally {
-            setLoading(false);
-        }
-    };
 
     const handleBack = () => {
         if (step === 0) return;
@@ -476,6 +503,12 @@ function RegisterPageContent() {
 
         try {
             setLoading(true);
+            setLoadingMessage("Synchronizing Secure Gateway...");
+
+            // Artificial delay for visual stability and to show the portal
+            await new Promise(r => setTimeout(r, 1500));
+
+            setLoadingMessage("Uploading Payment Evidence...");
             const fileExt = paymentProof.screenshot.name.split('.').pop();
             const fileName = `${formData.reg_no}_${Date.now()}.${fileExt}`;
             const { data: upData, error: upErr } = await supabase.storage.from("screenshots").upload(fileName, paymentProof.screenshot);
@@ -487,6 +520,7 @@ function RegisterPageContent() {
 
             // LAZY REGISTRATION FOR SOLO USERS
             if (!finalUserId && regMode === "SOLO") {
+                setLoadingMessage("Establishing Identity Pulse...");
                 const userParams = {
                     ...formData,
                     tshirt_size: formData.tshirtSize,
@@ -508,6 +542,7 @@ function RegisterPageContent() {
 
             // LAZY REGISTRATION FOR SQUAD (FORM)
             if (!finalUserId && regMode === "SQUAD" && squadSubMode === "FORM") {
+                setLoadingMessage("Initializing Command Structure...");
                 // 1. Register Leader with Atomic Payment
                 const userParams = {
                     ...formData,
@@ -522,60 +557,57 @@ function RegisterPageContent() {
 
                 const { data: user, error: regErr } = await registerUser(userParams);
                 if (regErr || !user) {
-                    console.error("Registration Error (SQUAD/LEADER):", regErr);
                     throw new Error(typeof regErr === 'string' ? regErr : (regErr as any)?.message || "Leader registration failed");
                 }
                 finalUserId = user.id;
-                createdUserId = user.id; // Track for rollback
+                createdUserId = user.id;
 
                 // 2. Create Team
+                setLoadingMessage("Forging Squad Designation...");
                 const isRgm = userParams.college.toUpperCase().includes("RGM");
                 const teamResp = await createTeam(teamName, user.id, "BULK", isRgm ? 4 : 5);
                 if (teamResp.error) throw new Error(teamResp.error);
                 const team = teamResp.data;
-                createdTeamId = team.id; // Track for rollback
+                createdTeamId = team.id;
 
                 // 3. Update Leader with Team ID and Role
                 const { error: updErr } = await supabase.from("users").update({ team_id: team.id, role: "LEADER" }).eq("id", user.id);
                 if (updErr) throw new Error(updErr.message);
 
-                // 4. Register Bulk Members with Atomic Status (Pending)
+                // 4. Register Bulk Members
                 if (additionalMembers.length > 0) {
+                    setLoadingMessage("Integrating Unit Personnel...");
                     const bulkResp = await registerBulkMembers(user.id, team.id, additionalMembers, "PENDING");
                     if (bulkResp.error) throw new Error(bulkResp.error);
                 }
             }
 
-            // LAZY REGISTRATION FOR JOINERS (Accepted Candidates)
-            if (!finalUserId && regMode === "SQUAD" && squadSubMode === "JOIN" && joinRequestStatus === "ACCEPTED") {
+            // SIMPLIFIED REGISTRATION FOR JOINERS - DIRECT ENTRY
+            if (!finalUserId && regMode === "SQUAD" && squadSubMode === "JOIN") {
+                setLoadingMessage("Infiltrating Target Squad...");
                 const userParams = {
                     ...formData,
                     tshirt_size: formData.tshirtSize,
                     college: formData.college === "RGM" ? "RGM College" : formData.otherCollege,
                     role: "MEMBER",
                     status: "PENDING" as const,
-                    team_id: searchedTeam.id, // Successfully joined
+                    team_id: searchedTeam.id,
                     transaction_id: paymentProof.transaction_id,
                     screenshot_url: publicUrl,
                     assigned_qr_id: assignedQR?.id
                 };
 
                 const { data: newUser, error: regErr } = await registerUser(userParams);
-                if (regErr) throw new Error(typeof regErr === 'string' ? regErr : (regErr as any).message || "Registration failed");
-                if (!newUser) throw new Error("Registration failed.");
+                if (regErr) throw new Error(typeof regErr === 'string' ? regErr : (regErr as any).message || "Join failed");
+                if (!newUser) throw new Error("Join failed.");
 
                 finalUserId = newUser.id;
                 createdUserId = newUser.id;
-
-                // Update request to COMPLETED
-                const { data: req } = await supabase.from("join_requests").select("id").eq("team_id", searchedTeam.id).eq("candidate_data->>email", formData.email).eq("status", "ACCEPTED").maybeSingle();
-                if (req) {
-                    await supabase.from("join_requests").update({ status: 'COMPLETED', user_id: newUser.id }).eq("id", req.id);
-                }
             }
 
-            // If user ALREADY existed
+            // If user ALREADY existed (compensation or resume)
             if (finalUserId && !createdUserId) {
+                setLoadingMessage("Patching Secure Channels...");
                 const { error: payErr } = await submitPayment(finalUserId!, {
                     transaction_id: paymentProof.transaction_id,
                     screenshot_url: publicUrl,
@@ -584,38 +616,26 @@ function RegisterPageContent() {
                 if (payErr) throw new Error(payErr);
             }
 
-            // Success Sequence
+            setLoadingMessage("Finalizing Transmission...");
             // [ACK & AUTO-LOGIN]
             if (finalUserId) {
-                document.cookie = `student_session=${finalUserId}; path=/; max-age=${60 * 60 * 24 * 30}`; // 30 days
+                document.cookie = `student_session=${finalUserId}; path=/; max-age=${60 * 60 * 24 * 30}`;
             }
-            setStep(7); // Move to Success Acknowledgment
+
+            await new Promise(r => setTimeout(r, 1000));
+            setStep(7);
 
         } catch (err: any) {
-            let errorMsg = "Unknown error";
-            try {
-                errorMsg = JSON.stringify(err, null, 2);
-            } catch (jsonErr) {
-                errorMsg = String(err);
-            }
-            console.error("Registration/Payment Error:", errorMsg);
+            console.error("Critical Registration Failure:", err);
             setError(getFriendlyError(err));
 
-            // ROLLBACK / COMPENSATION TRANSACTION
-            // If we created a user/team but failed later, destroy them to keep DB clean
             if (createdUserId) {
-                console.log("Rolling back user creation:", createdUserId);
-                if (createdTeamId) {
-                    await deleteTeam(createdTeamId); // This sets members to team_id null too
-                    // We might leave orphan bulk members if we don't clean them, 
-                    // but they are UNPAID and teamless, effectively invisible.
-                    // Ideally we delete them too, but we don't have their IDs easily here without another query.
-                    // Given the constraint "fast fix", deleting the leader and team is 90% solution.
-                }
+                if (createdTeamId) await deleteTeam(createdTeamId);
                 await deleteUser(createdUserId);
             }
         } finally {
             setLoading(false);
+            setLoadingMessage("");
         }
     };
 
@@ -625,17 +645,68 @@ function RegisterPageContent() {
             <div className="max-w-xl mx-auto relative z-10">
 
                 <div className="flex items-center gap-4 mb-10 px-4">
-                    {step > 0 && (
+                    {step > 0 && step < 7 && (
                         <button onClick={handleBack} className="p-2 bg-white/5 border border-white/10 rounded-xl hover:bg-white/10 transition-colors text-white/60 hover:text-white">
                             <ArrowLeft className="w-5 h-5" />
                         </button>
                     )}
                     <div className="flex gap-2 flex-1">
-                        {[0, 1, 2, 3, 4, 5, 6, 7].map((s) => (
+                        {[0, 1, 2, 3, 4, 5, 6].map((s) => (
                             <div key={s} className={`h-1 flex-1 rounded-full transition-all duration-500 ${step >= s ? 'bg-cyan-500 shadow-[0_0_10px_rgba(6,182,212,0.5)]' : 'bg-white/10'}`} />
                         ))}
                     </div>
                 </div>
+
+                {/* FULL SCREEN LOADING PULSE */}
+                <AnimatePresence>
+                    {loading && step === 6 && (
+                        <motion.div
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            className="fixed inset-0 z-[200] bg-black/90 backdrop-blur-2xl flex flex-col items-center justify-center p-8 text-center"
+                        >
+                            <div className="relative w-32 h-32 mb-12">
+                                <motion.div
+                                    animate={{ scale: [1, 1.2, 1], rotate: [0, 180, 360] }}
+                                    transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+                                    className="absolute inset-0 border-4 border-cyan-500/20 rounded-[2.5rem]"
+                                />
+                                <motion.div
+                                    animate={{ scale: [1.2, 1, 1.2], rotate: [360, 180, 0] }}
+                                    transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+                                    className="absolute inset-0 border-4 border-t-cyan-500 rounded-[2.5rem]"
+                                />
+                                <div className="absolute inset-0 flex items-center justify-center">
+                                    <Activity className="w-12 h-12 text-cyan-400 animate-pulse" />
+                                </div>
+                            </div>
+
+                            <h2 className="text-3xl font-black italic tracking-tighter text-white mb-4 uppercase">TRANSMISSION ACTIVE</h2>
+                            <p className="text-cyan-400/80 font-mono text-sm tracking-[0.2em] mb-8 h-4">{loadingMessage}</p>
+
+                            <div className="w-64 h-1.5 bg-white/5 rounded-full overflow-hidden border border-white/10">
+                                <motion.div
+                                    initial={{ x: "-100%" }}
+                                    animate={{ x: "100%" }}
+                                    transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+                                    className="w-full h-full bg-gradient-to-r from-transparent via-cyan-500 to-transparent shadow-[0_0_15px_rgba(6,182,212,0.5)]"
+                                />
+                            </div>
+
+                            <div className="mt-12 grid grid-cols-2 gap-8 opacity-20 filter grayscale">
+                                <div className="flex flex-col items-center gap-2">
+                                    <div className="w-10 h-10 rounded-xl bg-white/10 border border-white/20 animate-pulse" />
+                                    <span className="text-[8px] font-black tracking-widest uppercase">Encryption</span>
+                                </div>
+                                <div className="flex flex-col items-center gap-2">
+                                    <div className="w-10 h-10 rounded-xl bg-white/10 border border-white/20 animate-bounce" />
+                                    <span className="text-[8px] font-black tracking-widest uppercase">Routing</span>
+                                </div>
+                            </div>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
 
                 <AnimatePresence>
                     {error && (
@@ -760,9 +831,14 @@ function RegisterPageContent() {
                                                 <button onClick={handleSearchTeam} className="w-14 h-14 bg-purple-500 rounded-2xl flex items-center justify-center font-bold text-black border border-white/10"><Search className="w-6 h-6" /></button>
                                             </div>
                                             {searchedTeam && (
-                                                <div className="p-6 bg-white/5 border border-white/10 rounded-2xl animate-in fade-in slide-in-from-top-4 text-center">
+                                                <div className="p-6 bg-white/5 border border-white/10 rounded-2xl animate-in fade-in slide-in-from-top-4 text-center space-y-4">
                                                     <p className="text-[10px] text-white/40 uppercase tracking-widest mb-1">Squad Found</p>
-                                                    <h3 className="text-2xl font-black text-purple-400 mb-6 tracking-tight">{searchedTeam.name}</h3>
+                                                    <h3 className="text-2xl font-black text-purple-400 tracking-tight">{searchedTeam.name}</h3>
+                                                    <div className="inline-block px-4 py-2 bg-green-500/10 border border-green-500/20 rounded-xl">
+                                                        <p className="text-xs font-black text-green-400 uppercase tracking-widest">
+                                                            {searchedTeam.members?.length || 0}/{searchedTeam.max_members || 5} Slots Filled
+                                                        </p>
+                                                    </div>
                                                     <button onClick={handleTeamJoinProceed} className="w-full py-4 bg-white text-black font-black rounded-xl flex items-center justify-center gap-2">
                                                         PROCEED WITH THIS SQUAD <ChevronRight className="w-4 h-4" />
                                                     </button>
@@ -849,7 +925,7 @@ function RegisterPageContent() {
                                         </div>
                                     </div>
 
-                                    <div className="space-y-3">
+                                    <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
                                         {squadSubMode === 'FORM' && !teamDetails?.members?.some((m: any) => m.role === 'LEADER') && (
                                             <MemberRow name={formData.name} role="LEADER" status="UNPAID" color="red" />
                                         )}
@@ -866,71 +942,10 @@ function RegisterPageContent() {
                                         )}
                                     </div>
 
-                                    {squadSubMode === 'FORM' && pendingRequests.length > 0 && (
-                                        <div className="space-y-3 pt-6 border-t border-white/5">
-                                            <p className="text-xs text-yellow-500 font-bold uppercase tracking-widest pl-1 flex items-center gap-2">
-                                                <Activity className="w-3 h-3" /> Requests
-                                            </p>
-                                            {pendingRequests.map((req) => {
-                                                const userData = req.users || req.candidate_data || {};
-                                                return (
-                                                    <div key={req.id} className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/5">
-                                                        <div>
-                                                            <p className="text-xs font-bold">{userData.name || "Unknown"}</p>
-                                                            <p className="text-[9px] text-white/40 uppercase tracking-tighter">{userData.reg_no || "---"} • {userData.college || "N/A"}</p>
-                                                        </div>
-                                                        <div className="flex gap-2">
-                                                            <button onClick={() => handleRespondToRequest(req.id, 'REJECTED')} className="p-2 text-red-500 hover:bg-neutral-800 rounded-lg"><X className="w-4 h-4" /></button>
-                                                            <button onClick={() => handleRespondToRequest(req.id, 'ACCEPTED')} className="p-2 text-green-500 hover:bg-neutral-800 rounded-lg"><CheckCircle2 className="w-4 h-4" /></button>
-                                                        </div>
-                                                    </div>
-                                                );
-                                            })}
-                                        </div>
-                                    )}
+                                    {/* Proceed to checkout */}
 
-                                    {squadSubMode === 'FORM' ? (
+                                    {squadSubMode === 'FORM' && (
                                         <button onClick={handleFinalSquadSubmit} className="w-full py-4 bg-green-500 text-black font-black rounded-xl shadow-[0_0_30px_rgba(34,197,94,0.3)] uppercase text-sm tracking-widest">PROCEED TO CHECKOUT</button>
-                                    ) : (
-                                        <div className="space-y-4">
-                                            {joinRequestStatus === 'PENDING' && (
-                                                <div className="text-center p-8 bg-white/5 border border-dashed border-white/10 rounded-3xl">
-                                                    <Loader2 className="w-10 h-10 text-purple-500 animate-spin mx-auto mb-4" />
-                                                    <p className="text-xs font-black tracking-widest uppercase text-white/40">Waiting for Captain approval...</p>
-                                                    <p className="text-[10px] text-white/20 mt-2">Request sent to {searchedTeam?.name}</p>
-                                                </div>
-                                            )}
-                                            {joinRequestStatus === 'ACCEPTED' && (
-                                                <div className="text-center p-8 bg-green-500/10 border border-green-500/20 rounded-3xl">
-                                                    <CheckCircle2 className="w-10 h-10 text-green-500 mx-auto mb-4" />
-                                                    <p className="text-xs font-black tracking-widest uppercase text-green-400">Request Approved!</p>
-                                                    <p className="text-[10px] text-green-500/60 mt-2 mb-6 uppercase font-bold">Secure your slot by transmitting the entry fee</p>
-                                                    <button
-                                                        onClick={async () => {
-                                                            try {
-                                                                setLoading(true);
-                                                                setFinalAmount(800);
-                                                                setStep(5);
-                                                            } catch (err: any) {
-                                                                setError(getFriendlyError(err));
-                                                            } finally {
-                                                                setLoading(false);
-                                                            }
-                                                        }}
-                                                        className="w-full py-4 bg-green-500 text-black font-black rounded-xl uppercase text-xs tracking-widest shadow-[0_0_20px_rgba(34,197,94,0.2)]"
-                                                    >
-                                                        Proceed to Payment
-                                                    </button>
-                                                </div>
-                                            )}
-                                            {joinRequestStatus === 'REJECTED' && (
-                                                <div className="text-center p-8 bg-red-500/10 border border-red-500/20 rounded-3xl">
-                                                    <X className="w-10 h-10 text-red-500 mx-auto mb-4" />
-                                                    <p className="text-xs font-black tracking-widest uppercase text-red-400">Request Declined</p>
-                                                    <button onClick={() => setStep(1)} className="mt-4 text-[10px] font-black uppercase text-white/40 hover:text-white underline tracking-tighter">Try another squad or go solo</button>
-                                                </div>
-                                            )}
-                                        </div>
                                     )}
                                 </div>
                             )}
@@ -1094,9 +1109,18 @@ function RegisterPageContent() {
                             <button
                                 onClick={handlePaymentSubmit}
                                 disabled={loading}
-                                className="w-full py-4 bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-black rounded-2xl active:scale-95 transition-all shadow-xl flex items-center justify-center gap-3 disabled:opacity-50"
+                                className="w-full py-4 bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-black rounded-2xl active:scale-95 transition-all shadow-xl flex flex-col items-center justify-center gap-2 disabled:opacity-50"
                             >
-                                {loading ? <Loader2 className="animate-spin" /> : <><CheckCircle2 className="w-5 h-5" /> SUBMIT TRANSMISSION</>}
+                                {loading ? (
+                                    <>
+                                        <Loader2 className="animate-spin w-5 h-5" />
+                                        {loadingMessage && <span className="text-xs font-medium opacity-80">{loadingMessage}</span>}
+                                    </>
+                                ) : (
+                                    <div className="flex items-center gap-3">
+                                        <CheckCircle2 className="w-5 h-5" /> SUBMIT TRANSMISSION
+                                    </div>
+                                )}
                             </button>
                         </motion.div>
                     )}
@@ -1113,37 +1137,39 @@ function RegisterPageContent() {
             <AnimatePresence>
                 {showAddMemberModal && (
                     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/90 backdrop-blur-xl z-[100] flex items-center justify-center p-4">
-                        <motion.div initial={{ scale: 0.95, y: 30 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 30 }} className="bg-neutral-900 border border-white/10 rounded-3xl p-6 sm:p-8 max-w-lg w-full relative">
-                            <button onClick={() => setShowAddMemberModal(false)} className="absolute top-6 right-6 p-2 text-white/40 hover:text-white bg-white/5 rounded-full"><X className="w-4 h-4" /></button>
+                        <motion.div initial={{ scale: 0.95, y: 30 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 30 }} className="bg-neutral-900 border border-white/10 rounded-3xl p-6 sm:p-8 max-w-lg w-full relative max-h-[90vh] flex flex-col">
+                            <button onClick={() => setShowAddMemberModal(false)} className="absolute top-6 right-6 p-2 text-white/40 hover:text-white bg-white/5 rounded-full z-10"><X className="w-4 h-4" /></button>
                             <Header title="Add Member" subtitle="Legion Expansion" />
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 my-6">
-                                <FormInput label="Name" icon={User} value={newMember.name} onChange={(v: string) => setNewMember({ ...newMember, name: v })} placeholder="Full Name" />
-                                <FormInput label="Reg No" icon={Hash} value={newMember.reg_no} onChange={(v: string) => setNewMember({ ...newMember, reg_no: v.toUpperCase() })} placeholder="Reg No" />
-                                <FormInput label="Email" icon={Mail} value={newMember.email} onChange={(v: string) => setNewMember({ ...newMember, email: v })} placeholder="Email Address" />
-                                <FormInput label="Phone" icon={Phone} value={newMember.phone} onChange={(v: string) => setNewMember({ ...newMember, phone: v })} placeholder="Phone Number" />
+                            <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar my-6">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pb-4">
+                                    <FormInput label="Name" icon={User} value={newMember.name} onChange={(v: string) => setNewMember({ ...newMember, name: v })} placeholder="Full Name" />
+                                    <FormInput label="Reg No" icon={Hash} value={newMember.reg_no} onChange={(v: string) => setNewMember({ ...newMember, reg_no: v.toUpperCase() })} placeholder="Reg No" />
+                                    <FormInput label="Email" icon={Mail} value={newMember.email} onChange={(v: string) => setNewMember({ ...newMember, email: v })} placeholder="Email Address" />
+                                    <FormInput label="Phone" icon={Phone} value={newMember.phone} onChange={(v: string) => setNewMember({ ...newMember, phone: v })} placeholder="Phone Number" />
 
-                                <div className="space-y-1.5 flex flex-col">
-                                    <label className="text-[9px] uppercase font-black text-white/30 tracking-widest pl-1">College</label>
-                                    <select value={newMember.college} onChange={(e) => setNewMember({ ...newMember, college: e.target.value })} className="bg-white/5 border border-white/10 rounded-2xl py-3.5 px-4 outline-none focus:border-cyan-500/50 transition-all font-medium text-white text-xs sm:text-sm h-[46px]">
-                                        <option value="RGM" className="bg-neutral-900">RGM</option>
-                                        <option value="OTHERS" className="bg-neutral-900">Others</option>
-                                    </select>
-                                </div>
-                                {newMember.college === "OTHERS" && (
-                                    <div className="sm:col-span-2">
-                                        <FormInput label="College Name" icon={ExternalLink} value={newMember.otherCollege} onChange={(v: string) => setNewMember({ ...newMember, otherCollege: v })} placeholder="Your College Name" />
+                                    <div className="space-y-1.5 flex flex-col">
+                                        <label className="text-[9px] uppercase font-black text-white/30 tracking-widest pl-1">College</label>
+                                        <select value={newMember.college} onChange={(e) => setNewMember({ ...newMember, college: e.target.value })} className="bg-white/5 border border-white/10 rounded-2xl py-3.5 px-4 outline-none focus:border-cyan-500/50 transition-all font-medium text-white text-xs sm:text-sm h-[46px]">
+                                            <option value="RGM" className="bg-neutral-900">RGM</option>
+                                            <option value="OTHERS" className="bg-neutral-900">Others</option>
+                                        </select>
                                     </div>
-                                )}
-                                <div className="space-y-1.5 flex flex-col">
-                                    <label className="text-[9px] uppercase font-black text-white/30 tracking-widest pl-1">Shirt Size</label>
-                                    <select value={newMember.tshirtSize} onChange={(e) => setNewMember({ ...newMember, tshirtSize: e.target.value })} className="bg-white/5 border border-white/10 rounded-2xl py-3.5 px-4 outline-none focus:border-cyan-500/50 transition-all font-medium text-white text-xs sm:text-sm h-[46px]">
-                                        {["XS", "S", "M", "L", "XL", "XXL"].map(s => <option key={s} value={s} className="bg-neutral-900">{s}</option>)}
-                                    </select>
+                                    {newMember.college === "OTHERS" && (
+                                        <div className="sm:col-span-2">
+                                            <FormInput label="College Name" icon={ExternalLink} value={newMember.otherCollege} onChange={(v: string) => setNewMember({ ...newMember, otherCollege: v })} placeholder="Your College Name" />
+                                        </div>
+                                    )}
+                                    <div className="space-y-1.5 flex flex-col">
+                                        <label className="text-[9px] uppercase font-black text-white/30 tracking-widest pl-1">Shirt Size</label>
+                                        <select value={newMember.tshirtSize} onChange={(e) => setNewMember({ ...newMember, tshirtSize: e.target.value })} className="bg-white/5 border border-white/10 rounded-2xl py-3.5 px-4 outline-none focus:border-cyan-500/50 transition-all font-medium text-white text-xs sm:text-sm h-[46px]">
+                                            {["XS", "S", "M", "L", "XL", "XXL"].map(s => <option key={s} value={s} className="bg-neutral-900">{s}</option>)}
+                                        </select>
+                                    </div>
+                                    <FormInput label="Branch" icon={Activity} value={newMember.branch} onChange={(v: string) => setNewMember({ ...newMember, branch: v })} placeholder="CSE" />
+                                    <FormInput label="Year" icon={Clock} value={newMember.year} onChange={(v: string) => setNewMember({ ...newMember, year: v })} placeholder="III" />
                                 </div>
-                                <FormInput label="Branch" icon={Activity} value={newMember.branch} onChange={(v: string) => setNewMember({ ...newMember, branch: v })} placeholder="CSE" />
-                                <FormInput label="Year" icon={Clock} value={newMember.year} onChange={(v: string) => setNewMember({ ...newMember, year: v })} placeholder="III" />
                             </div>
-                            <button onClick={handleAddMember} className="w-full py-4 bg-cyan-500 text-black font-black rounded-xl uppercase tracking-widest text-xs">CONFIRM WARRIOR</button>
+                            <button onClick={handleAddMember} className="w-full py-4 bg-cyan-500 text-black font-black rounded-xl uppercase tracking-widest text-xs shrink-0">CONFIRM WARRIOR</button>
                         </motion.div>
                     </motion.div>
                 )}
@@ -1278,7 +1304,7 @@ function SuccessView({ onProceed }: { onProceed: () => void }) {
             <div className="space-y-3">
                 <h2 className="text-3xl font-black text-white italic tracking-tighter uppercase">Transmission Success</h2>
                 <p className="text-sm text-white/50 max-w-xs mx-auto leading-relaxed">
-                    Your registration and payment have been synchronized. The Sentinels will verify your details within 2-4 hours.
+                    Your unit profile and payment metadata have been synchronized. The sentinels are validating the signal. Full interface access will activate shortly.
                 </p>
             </div>
 

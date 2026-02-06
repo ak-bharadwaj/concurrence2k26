@@ -45,7 +45,7 @@ export default function SupportPage() {
                 if (!uErr) {
                     setUser(userData);
                     const ticketsData = await getUserSupportTickets(userId);
-                    setTickets(ticketsData || []);
+                    setTickets(ticketsData?.data || []);
                 }
             }
         } catch (err: any) {

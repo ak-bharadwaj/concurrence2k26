@@ -101,7 +101,8 @@ export default function SubDashboard() {
             setProcessingId(user.id);
 
             if (action === "APPROVED") {
-                const link = await getActiveGroupLink(user.college);
+                const linkRes = await getActiveGroupLink(user.college);
+                const link = linkRes?.data || "";
                 await updateStatus(user.id, admin.id, "APPROVED", "APPROVE_PAYMENT", link || "");
             } else if (action === "REJECTED") {
                 await updateStatus(user.id, admin.id, "REJECTED", "REJECT_PAYMENT");
