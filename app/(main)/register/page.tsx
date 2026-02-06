@@ -145,7 +145,44 @@ function RegisterPageContent() {
         (teamDetails?.members?.length || 1) + additionalMembers.length
     ) * 800;
 
-    // --- Session Restoration ---
+    // --- Session Storage Restoration (runs first) ---
+    useEffect(() => {
+        try {
+            const savedData = sessionStorage.getItem('hackathon_registration_form_data');
+            if (savedData) {
+                const parsed = JSON.parse(savedData);
+                if (parsed.formData) setFormData(parsed.formData);
+                if (parsed.additionalMembers) setAdditionalMembers(parsed.additionalMembers);
+                if (parsed.teamName) setTeamName(parsed.teamName);
+                if (parsed.regMode) setRegMode(parsed.regMode);
+                if (parsed.squadSubMode) setSquadSubMode(parsed.squadSubMode);
+                if (parsed.searchedTeam) setSearchedTeam(parsed.searchedTeam);
+                if (parsed.step) setStep(parsed.step);
+            }
+        } catch (e) {
+            console.error('Failed to restore session data:', e);
+        }
+    }, []);
+
+    // --- Session Storage Persistence ---
+    useEffect(() => {
+        try {
+            const dataToSave = {
+                formData,
+                additionalMembers,
+                teamName,
+                regMode,
+                squadSubMode,
+                searchedTeam,
+                step
+            };
+            sessionStorage.setItem('hackathon_registration_form_data', JSON.stringify(dataToSave));
+        } catch (e) {
+            console.error('Failed to save session data:', e);
+        }
+    }, [formData, additionalMembers, teamName, regMode, squadSubMode, searchedTeam, step]);
+
+    // --- Cookie-based Session Restoration ---
     useEffect(() => {
         const sessionCookie = document.cookie.split(';').find(c => c.trim().startsWith('student_session='));
         const existingUserId = sessionCookie?.split('=')[1];
@@ -622,6 +659,13 @@ function RegisterPageContent() {
                 document.cookie = `student_session=${finalUserId}; path=/; max-age=${60 * 60 * 24 * 30}`;
             }
 
+            // Clear session storage after successful payment
+            try {
+                sessionStorage.removeItem('hackathon_registration_form_data');
+            } catch (e) {
+                console.error('Failed to clear session data:', e);
+            }
+
             await new Promise(r => setTimeout(r, 1000));
             setStep(7);
 
@@ -831,16 +875,16 @@ function RegisterPageContent() {
                                                 <button onClick={handleSearchTeam} className="w-14 h-14 bg-purple-500 rounded-2xl flex items-center justify-center font-bold text-black border border-white/10"><Search className="w-6 h-6" /></button>
                                             </div>
                                             {searchedTeam && (
-                                                <div className="p-6 bg-white/5 border border-white/10 rounded-2xl animate-in fade-in slide-in-from-top-4 text-center space-y-4">
+                                                <div className="p-4 sm:p-6 bg-white/5 border border-white/10 rounded-2xl animate-in fade-in slide-in-from-top-4 text-center space-y-4">
                                                     <p className="text-[10px] text-white/40 uppercase tracking-widest mb-1">Squad Found</p>
-                                                    <h3 className="text-2xl font-black text-purple-400 tracking-tight">{searchedTeam.name}</h3>
+                                                    <h3 className="text-xl sm:text-2xl font-black text-purple-400 tracking-tight">{searchedTeam.name}</h3>
                                                     <div className="inline-block px-4 py-2 bg-green-500/10 border border-green-500/20 rounded-xl">
                                                         <p className="text-xs font-black text-green-400 uppercase tracking-widest">
                                                             {searchedTeam.members?.length || 0}/{searchedTeam.max_members || 5} Slots Filled
                                                         </p>
                                                     </div>
-                                                    <button onClick={handleTeamJoinProceed} className="w-full py-4 bg-white text-black font-black rounded-xl flex items-center justify-center gap-2">
-                                                        PROCEED WITH THIS SQUAD <ChevronRight className="w-4 h-4" />
+                                                    <button onClick={handleTeamJoinProceed} className="w-full min-h-[44px] py-3 sm:py-4 px-4 bg-white text-black font-black rounded-xl flex items-center justify-center gap-2 text-sm sm:text-base active:scale-95 transition-transform">
+                                                        <span className="truncate">PROCEED WITH THIS SQUAD</span> <ChevronRight className="w-4 h-4 shrink-0" />
                                                     </button>
                                                 </div>
                                             )}
