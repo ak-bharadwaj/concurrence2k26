@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import nodemailer from "nodemailer";
-import { supabase } from "@/lib/supabase";
+import { createClient } from "@/lib/supabase-server";
 import { cookies } from "next/headers";
 
 export async function POST(req: Request) {
@@ -17,6 +17,8 @@ export async function POST(req: Request) {
         if (!emailId || !testTo) {
             return NextResponse.json({ error: "Missing required parameters" }, { status: 400 });
         }
+
+        const supabase = await createClient();
 
         // Fetch credentials from DB
         const { data: emailAcc, error: dbErr } = await supabase

@@ -16,8 +16,8 @@ export function VerificationGroupModal({ group, onClose, onApprove, onReject, on
 
     if (!group) return null;
 
-    // Find the proof source (usually the leader or whoever paid)
-    const proofSource = group.members.find((m: any) => m.screenshot_url) || group.members[0];
+    // Find the proof sources
+    const proofs = group.proofs && group.proofs.length > 0 ? group.proofs : [group.members[0]];
     const totalAmount = group.members.length * 800;
 
     const isRgm = group.members.some((m: any) => m.college?.toUpperCase().includes('RGM'));
@@ -33,56 +33,66 @@ export function VerificationGroupModal({ group, onClose, onApprove, onReject, on
                 </button>
 
                 {/* Left: Proof Panel */}
-                <div className="w-full sm:w-1/2 bg-black/40 border-b sm:border-b-0 sm:border-r border-white/10 p-4 sm:p-6 flex flex-col overflow-y-auto custom-scrollbar">
-                    <h3 className="text-[10px] font-black uppercase text-white/40 tracking-widest mb-3 flex items-center gap-2">
-                        <ExternalLink className="w-3 h-3" /> Payment Proof
+                <div className="w-full sm:w-1/2 bg-black/40 border-b sm:border-b-0 sm:border-r border-white/10 p-4 sm:p-6 flex flex-col overflow-y-auto custom-scrollbar space-y-8">
+                    <h3 className="text-[10px] font-black uppercase text-white/40 tracking-widest mb-3 flex items-center gap-2 sticky top-0 bg-black/80 p-2 z-10 backdrop-blur">
+                        <ExternalLink className="w-3 h-3" /> Payment Proofs ({proofs.length})
                     </h3>
 
-                    <div className="relative rounded-2xl overflow-hidden border border-white/10 bg-black/20 group min-h-[250px] sm:min-h-[350px]">
-                        {proofSource?.screenshot_url ? (
-                            <a href={proofSource.screenshot_url} target="_blank" rel="noreferrer" className="block w-full h-full">
-                                <Image
-                                    src={proofSource.screenshot_url}
-                                    alt="Payment Proof"
-                                    fill
-                                    className="object-contain hover:scale-105 transition-transform duration-500"
-                                />
-                            </a>
-                        ) : (
-                            <div className="absolute inset-0 flex flex-col items-center justify-center text-white/20">
-                                <AlertCircle className="w-12 h-12 mb-2" />
-                                <span className="text-xs uppercase font-bold">No Proof Attached</span>
+                    {proofs.map((proofSource: any, idx: number) => (
+                        <div key={idx} className="space-y-4 border-b border-white/5 pb-8 last:border-0 last:pb-0">
+                            <div className="relative rounded-2xl overflow-hidden border border-white/10 bg-black/20 group min-h-[250px] sm:min-h-[350px]">
+                                {proofSource?.screenshot_url ? (
+                                    <a href={proofSource.screenshot_url} target="_blank" rel="noreferrer" className="block w-full h-full">
+                                        <Image
+                                            src={proofSource.screenshot_url}
+                                            alt={`Payment Proof ${idx + 1}`}
+                                            fill
+                                            className="object-contain hover:scale-105 transition-transform duration-500"
+                                        />
+                                    </a>
+                                ) : (
+                                    <div className="absolute inset-0 flex flex-col items-center justify-center text-white/20">
+                                        <AlertCircle className="w-12 h-12 mb-2" />
+                                        <span className="text-xs uppercase font-bold">No Proof Attached</span>
+                                        <span className="text-[10px] opacity-50 mt-1">{proofSource?.name}</span>
+                                    </div>
+                                )}
                             </div>
-                        )}
-                    </div>
 
-                    <div className="mt-4 space-y-3">
-                        <div className="bg-white/5 border border-white/5 rounded-xl p-3">
-                            <label className="text-[9px] uppercase font-bold text-white/30 tracking-widest block mb-1">Transaction ID (UTR)</label>
-                            <div className="font-mono text-cyan-400 text-sm sm:text-base break-all" title={proofSource?.transaction_id}>
-                                {proofSource?.transaction_id || "MISSING-ID"}
-                            </div>
-                        </div>
-                        <div className="grid grid-cols-2 gap-3">
-                            <div className="bg-white/5 border border-white/5 rounded-xl p-3">
-                                <label className="text-[9px] uppercase font-bold text-white/30 tracking-widest block mb-1">Dues Paid</label>
-                                <div className="font-black text-green-400 text-lg">₹{totalAmount}</div>
-                            </div>
-                            <div className="bg-white/5 border border-white/5 rounded-xl p-3">
-                                <label className="text-[9px] uppercase font-bold text-white/30 tracking-widest block mb-1">Warriors</label>
-                                <div className={`font-black text-lg flex items-center gap-2 ${isOverCapacity ? 'text-red-400' : 'text-white'}`}>
-                                    {group.members.length} <span className="text-[9px] text-white/20 font-mono">/ {maxMembers}</span>
+                            <div className="space-y-2">
+                                <div className="bg-white/5 border border-white/5 rounded-xl p-3 flex justify-between items-center">
+                                    <div className="min-w-0">
+                                        <label className="text-[9px] uppercase font-bold text-white/30 tracking-widest block mb-1">Transaction ID</label>
+                                        <div className="font-mono text-cyan-400 text-sm sm:text-base break-all" title={proofSource?.transaction_id}>
+                                            {proofSource?.transaction_id || "MISSING-ID"}
+                                        </div>
+                                    </div>
+                                    <div className="text-right shrink-0 ml-4">
+                                        <label className="text-[9px] uppercase font-bold text-white/30 tracking-widest block mb-1">Payer</label>
+                                        <div className="text-xs font-bold text-white">{proofSource?.name}</div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
-                        {isOverCapacity && (
-                            <div className="text-[9px] font-black text-red-500 bg-red-500/10 p-2 rounded border border-red-500/20 flex items-center gap-2 uppercase tracking-tight">
-                                <AlertTriangle className="w-3 h-3 shrink-0" /> Over Capacity Detected
+                    ))}
+                    <div className="grid grid-cols-2 gap-3">
+                        <div className="bg-white/5 border border-white/5 rounded-xl p-3">
+                            <label className="text-[9px] uppercase font-bold text-white/30 tracking-widest block mb-1">Dues Paid</label>
+                            <div className="font-black text-green-400 text-lg">₹{totalAmount}</div>
+                        </div>
+                        <div className="bg-white/5 border border-white/5 rounded-xl p-3">
+                            <label className="text-[9px] uppercase font-bold text-white/30 tracking-widest block mb-1">Warriors</label>
+                            <div className={`font-black text-lg flex items-center gap-2 ${isOverCapacity ? 'text-red-400' : 'text-white'}`}>
+                                {group.members.length} <span className="text-[9px] text-white/20 font-mono">/ {maxMembers}</span>
                             </div>
-                        )}
+                        </div>
                     </div>
+                    {isOverCapacity && (
+                        <div className="text-[9px] font-black text-red-500 bg-red-500/10 p-2 rounded border border-red-500/20 flex items-center gap-2 uppercase tracking-tight">
+                            <AlertTriangle className="w-3 h-3 shrink-0" /> Over Capacity Detected
+                        </div>
+                    )}
                 </div>
-
                 {/* Right: Members & Actions */}
                 <div className="w-full sm:w-1/2 flex flex-col bg-neutral-900 overflow-hidden">
                     <div className="p-4 sm:p-6 border-b border-white/5 shrink-0">

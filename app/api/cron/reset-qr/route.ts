@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
+import { createAdminClient } from '@/lib/supabase-admin';
 
 // API Route to reset QR usage counters
 // Call this daily via Vercel Cron or external scheduler
@@ -12,6 +12,8 @@ export async function GET(request: NextRequest) {
         if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
         }
+
+        const supabase = createAdminClient();
 
         // Reset all active QR codes
         const { error } = await supabase

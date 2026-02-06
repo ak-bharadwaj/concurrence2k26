@@ -42,13 +42,13 @@ export function getFriendlyError(error: any): string {
 
         // CATCH-ALL FOR TECHNICAL LEAKAGE: If it looks like an object even without quotes
         if (strMsg.includes('code:') || strMsg.includes('details:') || strMsg.trim().startsWith('{')) {
-            return "Registration error: Please ensure your details are correct (check for duplicate Reg No/Email).";
+            return "Registration signal interrupted. Please ensure your details are correct and your internet is stable.";
         }
 
         if (lowerMsg.includes("invalid team code") || lowerMsg.includes("not found")) return "Invalid Squad Code. Please check and try again.";
         if (lowerMsg.includes("team is full") || lowerMsg.includes("capacity")) return "Oops, looks like you're late! This squad is full now.";
         if (lowerMsg.includes("already registered") || lowerMsg.includes("duplicate")) return "Registration Conflict: This ID or Email is already officially registered.";
-        if (lowerMsg.includes("failed to fetch") || lowerMsg.includes("network")) return "Network Issues: Please check your internet connection and try again.";
+        if (lowerMsg.includes("failed to fetch") || lowerMsg.includes("network")) return "Better Internet Required: Please check your connection and try again.";
 
         return strMsg;
     }
@@ -62,7 +62,7 @@ function translateCode(code: string, rawMessage: string = ""): string {
         case "23505":
             if (message.includes("reg_no")) return "This Registration Number is already registered.";
             if (message.includes("email")) return "This Email address is already in use.";
-            if (message.includes("phone")) return "This Mobile Number is already in use.";
+
             if (message.includes("teams_name_key") || message.includes("teams.name")) return "This Squad Name is already taken. Choose another.";
             if (message.includes("transaction_id")) return "This Transaction ID has already been submitted by another user.";
             return "Duplicate Record: One of your details (Email/Phone/Name) is already in use.";

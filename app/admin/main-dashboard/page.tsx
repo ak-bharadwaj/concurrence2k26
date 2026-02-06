@@ -712,7 +712,7 @@ export default function MainDashboard() {
                     teamName: u.squad?.name,
                     teamNumber: u.squad?.team_number || u.squad?.unique_code,
                     members: teamMembers,
-                    proof: teamMembers.find((m: any) => m.screenshot_url) || null,
+                    proofs: teamMembers.filter((m: any) => m.screenshot_url),
                     count: teamMembers.length,
                     max_members: u.squad?.max_members
                 });
@@ -724,7 +724,7 @@ export default function MainDashboard() {
                     teamName: u.name,
                     teamNumber: 'SOLO',
                     members: [u],
-                    proof: u,
+                    proofs: [u],
                     count: 1
                 });
             }

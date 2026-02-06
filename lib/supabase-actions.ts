@@ -1,10 +1,12 @@
 "use server";
 
-import { supabase } from "./supabase";
+import { createAdminClient } from "./supabase-admin";
+import { cookies } from "next/headers";
 import { sendEmail, EMAIL_TEMPLATES } from "./email";
 
 export async function getNextAvailableQR(amount: number = 800) {
     try {
+        const supabase = createAdminClient();
         const { data: qr, error } = await supabase
             .from("qr_codes")
             .select("*")
@@ -35,6 +37,7 @@ export async function getNextAvailableQR(amount: number = 800) {
 
 export async function resetQRUsage() {
     try {
+        const supabase = createAdminClient();
         const { error } = await supabase
             .from("qr_codes")
             .update({ today_usage: 0 });
@@ -47,6 +50,7 @@ export async function resetQRUsage() {
 
 export async function createTeam(name: string, leaderId: string | null, paymentMode: "INDIVIDUAL" | "BULK" = "INDIVIDUAL", maxMembers: number = 5) {
     try {
+        const supabase = createAdminClient();
         // Generate unique 6-digit code
         const code = Math.random().toString(36).substring(2, 8).toUpperCase();
 
@@ -90,6 +94,7 @@ export async function createTeam(name: string, leaderId: string | null, paymentM
 
 export async function joinTeam(code: string) {
     try {
+        const supabase = createAdminClient();
         const { data: team, error } = await supabase
             .from("teams")
             .select("id, name, unique_code, payment_mode, max_members, leader_id, members:users!team_id(id), leader:users!leader_id(id, name, email, status)")
@@ -107,6 +112,7 @@ export async function joinTeam(code: string) {
 
 export async function getTeamDetails(teamId: string) {
     try {
+        const supabase = createAdminClient();
         const { data, error } = await supabase
             .from("teams")
             .select(`
@@ -125,6 +131,7 @@ export async function getTeamDetails(teamId: string) {
 
 export async function createTicket(userId: string | null, issueType: string, description: string) {
     try {
+        const supabase = createAdminClient();
         const { error } = await supabase
             .from("support_tickets")
             .insert([{ user_id: userId, issue_type: issueType, description, status: "OPEN" }]);
@@ -154,6 +161,7 @@ export async function registerUser(userData: {
     assigned_qr_id?: string;
 }) {
     try {
+        const supabase = createAdminClient();
         // 1. Check for existing record by Email (our new unique anchor)
         const { data: existingUser } = await supabase
             .from("users")
@@ -165,17 +173,7 @@ export async function registerUser(userData: {
             return { error: "This registration (Email) is already locked (Approved/Pending). Please contact support for changes." };
         }
 
-        // 1b. Check if phone number is used by ANOTHER user
-        const { data: phoneConflict } = await supabase
-            .from("users")
-            .select("email")
-            .eq("phone", userData.phone)
-            .neq("email", userData.email) // Allow update for same email
-            .maybeSingle();
 
-        if (phoneConflict) {
-            return { error: `The mobile number ${userData.phone} is already linked to another registration. Please use a unique mobile number.` };
-        }
 
         // 2. Verify team_id if provided
         if (userData.team_id) {
@@ -232,6 +230,7 @@ export async function registerUser(userData: {
 
 export async function purgeUnpaidUsers() {
     try {
+        const supabase = createAdminClient();
         const { error } = await supabase
             .from("users")
             .delete()
@@ -245,10 +244,11 @@ export async function purgeUnpaidUsers() {
 
 export async function checkUserAvailability(email: string, phone: string) {
     try {
+        const supabase = createAdminClient();
         const { data, error } = await supabase
             .from("users")
             .select("id, status")
-            .or(`email.eq.${email.trim().toLowerCase()},phone.eq.${phone.trim()}`);
+            .or(`email.eq.${email.trim().toLowerCase()}`);
 
         if (error) return { error: error.message };
 
@@ -272,6 +272,14 @@ export async function submitPayment(userId: string, paymentData: {
     assigned_qr_id?: string;
 }) {
     try {
+        // Security: Verify user session
+        const cookieStore = await cookies();
+        const studentSession = cookieStore.get('student_session')?.value;
+        if (!studentSession || studentSession !== userId) {
+            return { error: "Unauthorized: Invalid Session" };
+        }
+
+        const supabase = createAdminClient();
         const { data: user, error: userErr } = await supabase
             .from("users")
             .update({
@@ -311,8 +319,32 @@ export async function updateStatus(
 ) {
     const updateData: any = { status: newStatus };
 
+    // Security: Verify Admin Session
+    const cookieStore = await cookies();
+    const adminSessionId = cookieStore.get('admin_session')?.value;
+
+    if (!adminSessionId) {
+        return { error: "Unauthorized: Admin session required" };
+    }
+
+    const supabase = createAdminClient();
+
+    // Verify admin role
+    const { data: adminUser } = await supabase
+        .from("admins")
+        .select("role")
+        .eq("id", adminSessionId)
+        .single();
+
+    if (!adminUser) {
+        return { error: "Unauthorized: Invalid Admin" };
+    }
+
+    // Use the real admin ID from session
+    const verifiedAdminId = adminSessionId;
+
     if (newStatus === "APPROVED" || newStatus === "REJECTED") {
-        updateData.verified_by = adminId;
+        updateData.verified_by = verifiedAdminId;
     }
 
     try {
@@ -342,7 +374,7 @@ export async function updateStatus(
         const { error: logError } = await supabase.from("action_logs").insert([
             {
                 user_id: userId,
-                admin_id: adminId,
+                admin_id: verifiedAdminId,
                 action: action,
             },
         ]);
@@ -397,6 +429,12 @@ export async function approveTeamPayment(
     paymentDetails: { transaction_id: string | null; screenshot_url: string | null }
 ) {
     try {
+        const cookieStore = await cookies();
+        const adminSessionId = cookieStore.get('admin_session')?.value;
+        if (!adminSessionId) return { error: "Unauthorized" };
+
+        const supabase = createAdminClient();
+
         const { data: team, error: teamErr } = await supabase
             .from("teams")
             .update({}) // Status removed, column doesn't exist
@@ -408,7 +446,7 @@ export async function approveTeamPayment(
 
         const { error: membersErr } = await supabase
             .from("users")
-            .update({ status: "APPROVED", verified_by: adminId })
+            .update({ status: "APPROVED", verified_by: adminSessionId })
             .eq("team_id", teamId);
 
         if (membersErr) return { error: membersErr.message };
@@ -421,6 +459,7 @@ export async function approveTeamPayment(
 
 export async function getActiveGroupLink(college: string) {
     try {
+        const supabase = createAdminClient();
         const { data, error } = await supabase
             .from("whatsapp_links")
             .select("link")
@@ -437,6 +476,7 @@ export async function getActiveGroupLink(college: string) {
 
 export async function getActiveEmailAccounts() {
     try {
+        const supabase = createAdminClient();
         const { data, error } = await supabase
             .from("email_accounts")
             .select("*")
@@ -451,6 +491,12 @@ export async function getActiveEmailAccounts() {
 
 export async function deleteUser(userId: string) {
     try {
+        // Security: Verify Admin Session
+        const cookieStore = await cookies();
+        const adminSessionId = cookieStore.get('admin_session')?.value;
+        if (!adminSessionId) return { error: "Unauthorized" };
+
+        const supabase = createAdminClient();
         const { error } = await supabase
             .from("users")
             .delete()
@@ -466,6 +512,7 @@ export async function deleteUser(userId: string) {
 
 export async function requestJoinTeam(teamId: string, userId: string | null, candidateData?: any) {
     try {
+        const supabase = createAdminClient();
         const insertData: any = { team_id: teamId, status: 'PENDING' };
         if (userId) {
             insertData.user_id = userId;
@@ -475,7 +522,7 @@ export async function requestJoinTeam(teamId: string, userId: string | null, can
 
         // Handle conflict differently for anonymous vs logged in
         // If logged in, conflict is on team_id, user_id
-        // If anonymous, we don't have a strict unique constraint on candidate_data -> email yet 
+        // If anonymous, we don't have a strict unique constraint on candidate_data->>email yet 
         // but we can try to upsert based on team_id and candidate_data->>email for anonymous
 
         const { data, error } = await supabase
@@ -498,6 +545,7 @@ export async function requestJoinTeam(teamId: string, userId: string | null, can
 
 export async function getJoinRequests(teamId: string, status: 'PENDING' | 'ACCEPTED' | 'COMPLETED' = 'PENDING') {
     try {
+        const supabase = createAdminClient();
         const { data, error } = await supabase
             .from("join_requests")
             .select(`
@@ -542,6 +590,7 @@ export async function getJoinRequests(teamId: string, status: 'PENDING' | 'ACCEP
 
 export async function getUserJoinRequest(userId: string) {
     try {
+        const supabase = createAdminClient();
         const { data, error } = await supabase
             .from("join_requests")
             .select("*, teams!team_id(name)")
@@ -558,6 +607,7 @@ export async function getUserJoinRequest(userId: string) {
 
 export async function respondToJoinRequest(requestId: string, status: 'ACCEPTED' | 'REJECTED') {
     try {
+        const supabase = createAdminClient();
         const { data: request, error: reqErr } = await supabase
             .from("join_requests")
             .select("*, users!user_id(name, email)")
@@ -644,6 +694,7 @@ export async function registerBulkMembers(
     initialStatus: "UNPAID" | "PENDING" = "UNPAID"
 ) {
     try {
+        const supabase = createAdminClient();
         const membersToInsert = members.map(m => ({
             name: m.name,
             reg_no: m.reg_no.trim().toUpperCase(),
@@ -670,6 +721,7 @@ export async function registerBulkMembers(
 
 export async function removeMemberFromTeam(userId: string, teamId: string) {
     try {
+        const supabase = createAdminClient();
         const { error } = await supabase
             .from("users")
             .update({ team_id: null, role: "MEMBER" })
@@ -685,6 +737,7 @@ export async function removeMemberFromTeam(userId: string, teamId: string) {
 
 export async function leaveTeam(userId: string) {
     try {
+        const supabase = createAdminClient();
         const { data: user } = await supabase.from("users").select("role, team_id").eq("id", userId).single();
         if (user?.role === 'LEADER') {
             return { error: "Leaders cannot leave. You must delete the squad to disband." };
@@ -704,6 +757,7 @@ export async function leaveTeam(userId: string) {
 
 export async function updateTeamSettings(teamId: string, settings: { name?: string; max_members?: number }) {
     try {
+        const supabase = createAdminClient();
         const { error } = await supabase
             .from("teams")
             .update(settings)
@@ -718,6 +772,7 @@ export async function updateTeamSettings(teamId: string, settings: { name?: stri
 
 export async function deleteTeam(teamId: string) {
     try {
+        const supabase = createAdminClient();
         const { data: team } = await supabase.from("teams").select("payment_mode").eq("id", teamId).single();
 
         const updateData: any = { team_id: null, role: "MEMBER" };
@@ -749,7 +804,7 @@ export async function deleteTeam(teamId: string) {
 export async function addMemberToTeam(memberData: any, teamId: string) {
     try {
         const { reg_no, name, email, phone, college, branch, year, tshirt_size, otherCollege } = memberData;
-
+        const supabase = createAdminClient();
         const { data: existingUser } = await supabase
             .from("users")
             .select("*")
@@ -818,6 +873,7 @@ export async function addMemberToTeam(memberData: any, teamId: string) {
 
 export async function updateMemberDetails(userId: string, updates: any) {
     try {
+        const supabase = createAdminClient();
         const { error } = await supabase
             .from("users")
             .update(updates)
@@ -832,6 +888,7 @@ export async function updateMemberDetails(userId: string, updates: any) {
 
 export async function markAttendance(userId: string, teamId: string, date: string, time: string) {
     try {
+        const supabase = createAdminClient();
         const { data, error } = await supabase
             .from("attendance")
             .upsert([{
@@ -853,6 +910,7 @@ export async function markAttendance(userId: string, teamId: string, date: strin
 
 export async function fetchAttendanceReport(date: string) {
     try {
+        const supabase = createAdminClient();
         const { data: users, error: uErr } = await supabase
             .from("users")
             .select("id, name, reg_no, status, team_id, teams!team_id(name, team_number)");
@@ -881,6 +939,7 @@ export async function fetchAttendanceReport(date: string) {
 
 export async function sendCustomUserEmail(userId: string, subject: string, message: string) {
     try {
+        const supabase = createAdminClient();
         const { data: user, error: userErr } = await supabase
             .from("users")
             .select("name, email")

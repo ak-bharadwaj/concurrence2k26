@@ -1,9 +1,28 @@
+const withBundleAnalyzer = (await import('@next/bundle-analyzer')).default({
+  enabled: process.env.ANALYZE === 'true',
+})
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // 1. Enable React Compiler for better runtime performance (React 19 feature)
+  experimental: {
+    reactCompiler: true,
+    optimizePackageImports: ['lucide-react', 'recharts', 'framer-motion', '@radix-ui/react-icons'],
+  },
+
+  // 2. Build optimizations
   typescript: {
     ignoreBuildErrors: true,
   },
+  srl: {
+    // Suppress heavy logs during dev
+    silent: true
+  },
+
+  // 3. Image Optimization (Zero visual loss, faster loading)
   images: {
+    formats: ['image/avif', 'image/webp'],
+    minimumCacheTTL: 60,
     remotePatterns: [
       {
         protocol: 'https',
@@ -27,4 +46,4 @@ const nextConfig = {
   },
 }
 
-export default nextConfig
+export default withBundleAnalyzer(nextConfig)

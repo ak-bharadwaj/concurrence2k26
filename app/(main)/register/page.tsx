@@ -650,7 +650,13 @@ function RegisterPageContent() {
                     screenshot_url: publicUrl,
                     assigned_qr_id: assignedQR?.id
                 });
-                if (payErr) throw new Error(payErr);
+
+                if (payErr) {
+                    // Critical Requirement: Don't stop user. Log error but proceed.
+                    console.error("Payment submission background error (Non-fatal):", payErr);
+                    // We treat this as success for the user to avoid blocking them.
+                    // Admin can reconcile later or we can rely on registerUser data.
+                }
             }
 
             setLoadingMessage("Finalizing Transmission...");
@@ -883,8 +889,8 @@ function RegisterPageContent() {
                                                             {searchedTeam.members?.length || 0}/{searchedTeam.max_members || 5} Slots Filled
                                                         </p>
                                                     </div>
-                                                    <button onClick={handleTeamJoinProceed} className="w-full min-h-[44px] py-3 sm:py-4 px-4 bg-white text-black font-black rounded-xl flex items-center justify-center gap-2 text-sm sm:text-base active:scale-95 transition-transform">
-                                                        <span className="truncate">PROCEED WITH THIS SQUAD</span> <ChevronRight className="w-4 h-4 shrink-0" />
+                                                    <button onClick={handleTeamJoinProceed} className="w-full min-h-[56px] py-4 px-6 bg-white text-black font-black rounded-xl flex items-center justify-center gap-3 text-base shadow-xl relative z-10 active:scale-95 transition-transform hover:bg-gray-100">
+                                                        <span className="">JOIN TEAM</span> <ChevronRight className="w-5 h-5 shrink-0" />
                                                     </button>
                                                 </div>
                                             )}
@@ -1115,8 +1121,8 @@ function RegisterPageContent() {
                                     icon={Hash}
                                     value={paymentProof.transaction_id}
                                     onChange={(v: string) => setPaymentProof({ ...paymentProof, transaction_id: v.toUpperCase().replace(/[^A-Z0-9]/g, '') })}
-                                    placeholder="12-20 character UTR"
-                                    maxLength={20}
+                                    placeholder="12-25 character UTR"
+                                    maxLength={25}
                                 />
                                 <div className="space-y-2">
                                     <label className="text-[10px] uppercase font-black text-white/30 tracking-widest pl-1">Proof of Payment *</label>
@@ -1327,7 +1333,7 @@ function SuccessView({ onProceed }: { onProceed: () => void }) {
         <motion.div
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="glass-card p-10 rounded-[3rem] text-center space-y-8 relative overflow-hidden"
+            className="glass-card p-10 pb-24 rounded-[3rem] text-center space-y-8 relative overflow-hidden"
         >
             <div className="absolute inset-0 bg-gradient-to-b from-cyan-500/10 to-transparent pointer-events-none" />
 
