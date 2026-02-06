@@ -1005,6 +1005,8 @@ function RegisterPageContent() {
                                             <a
                                                 href={assignedQR?.qr_image_url || "#"}
                                                 download="Hackathon_QR.png"
+                                                target="_blank"
+                                                rel="noopener noreferrer"
                                                 className="block mt-4 text-[10px] uppercase font-bold tracking-widest text-cyan-400 hover:text-cyan-300 transition-colors cursor-pointer"
                                             >
                                                 Tap to download QR

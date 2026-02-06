@@ -24,7 +24,7 @@ export async function getNextAvailableQR(amount: number = 800) {
             .eq("id", qr.id);
 
         if (updateError) {
-             console.error("QR Update Error:", updateError);
+            console.error("QR Update Error:", updateError);
         }
 
         return qr;
@@ -75,10 +75,10 @@ export async function createTeam(name: string, leaderId: string | null, paymentM
                 }])
                 .select()
                 .single();
-            if (retryErr) throw retryErr;
+            if (retryErr) throw new Error(retryErr.message);
             return { data: retryTeam };
         }
-        throw error;
+        throw new Error(error.message);
     }
 
     return { data: team };
@@ -91,7 +91,7 @@ export async function joinTeam(code: string) {
         .eq("unique_code", code.trim().toUpperCase())
         .maybeSingle();
 
-    if (error) throw error;
+    if (error) throw new Error(error.message);
     if (!team) return { error: "Squad not found. Please check the code." };
 
     return { data: team };
@@ -107,7 +107,7 @@ export async function getTeamDetails(teamId: string) {
         .eq("id", teamId)
         .single();
 
-    if (error) throw error;
+    if (error) throw new Error(error.message);
     return data;
 }
 
@@ -115,7 +115,7 @@ export async function createTicket(userId: string | null, issueType: string, des
     const { error } = await supabase
         .from("support_tickets")
         .insert([{ user_id: userId, issue_type: issueType, description, status: "OPEN" }]);
-    if (error) throw error;
+    if (error) throw new Error(error.message);
     return true;
 }
 
@@ -219,7 +219,7 @@ export async function purgeUnpaidUsers() {
         .from("users")
         .delete()
         .eq("status", "UNPAID");
-    if (error) throw error;
+    if (error) throw new Error(error.message);
     return true;
 }
 
@@ -577,7 +577,7 @@ export async function registerBulkMembers(
     }));
 
     const { error } = await supabase.from("users").upsert(membersToInsert, { onConflict: 'email' });
-    if (error) throw error;
+    if (error) throw new Error(error.message);
     return true;
 }
 
@@ -590,7 +590,7 @@ export async function removeMemberFromTeam(userId: string, teamId: string) {
         .eq("id", userId)
         .eq("team_id", teamId);
 
-    if (error) throw error;
+    if (error) throw new Error(error.message);
     return true;
 }
 
@@ -605,7 +605,7 @@ export async function leaveTeam(userId: string) {
         .update({ team_id: null, role: "MEMBER" })
         .eq("id", userId);
 
-    if (error) throw error;
+    if (error) throw new Error(error.message);
     return true;
 }
 
@@ -615,7 +615,7 @@ export async function updateTeamSettings(teamId: string, settings: { name?: stri
         .update(settings)
         .eq("id", teamId);
 
-    if (error) throw error;
+    if (error) throw new Error(error.message);
     return true;
 }
 
@@ -632,7 +632,7 @@ export async function deleteTeam(teamId: string) {
         .update(updateData)
         .eq("team_id", teamId);
 
-    if (memberErr) throw memberErr;
+    if (memberErr) throw new Error(memberErr.message);
 
     await supabase.from("join_requests").delete().eq("team_id", teamId);
 
@@ -641,7 +641,7 @@ export async function deleteTeam(teamId: string) {
         .delete()
         .eq("id", teamId);
 
-    if (error) throw error;
+    if (error) throw new Error(error.message);
     return true;
 }
 
@@ -676,7 +676,7 @@ export async function addMemberToTeam(memberData: any, teamId: string) {
                 status: targetStatus
             })
             .eq("id", existingUser.id);
-        if (uErr) throw uErr;
+        if (uErr) throw new Error(uErr.message);
 
         await supabase.from("join_requests").update({ status: 'COMPLETED' }).eq("user_id", existingUser.id).neq("team_id", teamId);
 
