@@ -1636,9 +1636,10 @@ export default function MainDashboard() {
 
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                                 {getAllParticipantGroups(data.users.filter((u: any) => ['PENDING', 'VERIFYING'].includes(u.status))).map(group => {
-                                    const proofSource = group.proof;
+                                    const proofSource = group.proofs?.[0] || group.proof;
+                                    const proofCount = group.proofs?.length || 0;
                                     const totalAmount = group.count * 800;
-                                    const hasProof = !!proofSource?.screenshot_url;
+                                    const hasProof = !!proofSource?.screenshot_url || !!proofSource?.transaction_id;
                                     const isRgmGroup = isRGM(group);
                                     const maxMembers = group.max_members || (isRgmGroup ? 4 : 5);
                                     const isOverCapacity = group.count > maxMembers;
@@ -1694,8 +1695,13 @@ export default function MainDashboard() {
                                                 )}
                                                 {/* UTR Badge */}
                                                 {hasProof && (
-                                                    <div className="absolute bottom-2 left-2 bg-black/60 backdrop-blur-md px-2 py-1 rounded text-[9px] font-mono text-cyan-400 border border-white/10 truncate max-w-[90%]">
-                                                        {proofSource.transaction_id || "NO ID"}
+                                                    <div className="absolute bottom-2 left-2 bg-black/60 backdrop-blur-md px-2 py-1 rounded text-[9px] font-mono text-cyan-400 border border-white/10 flex items-center gap-2">
+                                                        <span>{proofSource.transaction_id || "NO ID"}</span>
+                                                        {proofCount > 1 && (
+                                                            <span className="bg-cyan-500 text-black px-1 rounded font-black text-[7px] animate-pulse">
+                                                                +{proofCount - 1} MORE
+                                                            </span>
+                                                        )}
                                                     </div>
                                                 )}
                                             </div>
@@ -1743,9 +1749,10 @@ export default function MainDashboard() {
                             {participantViewMode === 'GROUPED' ? (
                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-20">
                                     {getAllParticipantGroups(filteredUsers).map(group => {
-                                        const proofSource = group.proof;
+                                        const proofSource = group.proofs?.[0] || group.proof;
+                                        const proofCount = group.proofs?.length || 0;
                                         const totalAmount = group.count * 800;
-                                        const hasProof = !!proofSource?.screenshot_url;
+                                        const hasProof = !!proofSource?.screenshot_url || !!proofSource?.transaction_id;
                                         const isAllPaid = group.members.every((m: any) => m.status === 'APPROVED');
                                         const isRgmGroup = isRGM(group);
                                         const maxMembers = isRgmGroup ? 4 : 5;
@@ -1788,6 +1795,17 @@ export default function MainDashboard() {
                                                     ) : (
                                                         <div className="absolute inset-0 flex items-center justify-center text-[9px] font-black uppercase text-white/50 tracking-widest text-center px-4">
                                                             {isAllPaid ? 'Verification Complete' : 'Awaiting Proof Upload'}
+                                                        </div>
+                                                    )}
+                                                    {/* UTR Badge */}
+                                                    {hasProof && (
+                                                        <div className="absolute bottom-2 left-2 bg-black/60 backdrop-blur-md px-2 py-1 rounded text-[9px] font-mono text-cyan-400 border border-white/10 flex items-center gap-2">
+                                                            <span>{proofSource.transaction_id || "NO ID"}</span>
+                                                            {proofCount > 1 && (
+                                                                <span className="bg-cyan-500 text-black px-1 rounded font-black text-[7px] animate-pulse">
+                                                                    +{proofCount - 1} MORE
+                                                                </span>
+                                                            )}
                                                         </div>
                                                     )}
                                                 </div>
