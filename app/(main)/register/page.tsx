@@ -300,7 +300,7 @@ function RegisterPageContent() {
                     setStep(4);
                 } else if (squadSubMode === "JOIN") {
                     // ZERO-LEAK: Don't register yet. Just send Join Request with candidate data.
-                    const success = await handleJoinRequest(null);
+                    const success = await handleJoinRequest(undefined);
                     if (success) setStep(4);
                 }
             } else {
@@ -418,8 +418,8 @@ function RegisterPageContent() {
         try {
             if (!searchedTeam?.id) throw new Error("No squad selected. Please go back and find a squad.");
             setLoading(true);
-            const { error: joinErr } = await requestJoinTeam(searchedTeam.id, overrideId || userId, null);
-            if (joinErr) throw new Error(joinErr);
+            const { error: joinErr } = await requestJoinTeam(searchedTeam.id, overrideId || userId, formData);
+            if (joinErr) throw new Error(typeof joinErr === 'string' ? joinErr : (joinErr as any).message || "Join request failed");
 
             setJoinRequestSent(true);
             setJoinRequestStatus('PENDING');
@@ -511,8 +511,7 @@ function RegisterPageContent() {
 
                 // 2. Create Team
                 const isRgm = userParams.college.toUpperCase().includes("RGM");
-                const { data: team, error: teamErr } = await createTeam(teamName, user.id, "BULK", isRgm ? 4 : 5);
-                if (teamErr) throw new Error(typeof teamErr === 'string' ? teamErr : (teamErr as any).message || JSON.stringify(teamErr));
+                const { data: team } = await createTeam(teamName, user.id, "BULK", isRgm ? 4 : 5);
                 createdTeamId = team.id; // Track for rollback
 
                 // 3. Update Leader with Team ID and Role
@@ -520,8 +519,7 @@ function RegisterPageContent() {
 
                 // 4. Register Bulk Members with Atomic Status (Pending)
                 if (additionalMembers.length > 0) {
-                    const { error: bulkErr } = await registerBulkMembers(user.id, team.id, additionalMembers, "PENDING");
-                    if (bulkErr) throw new Error(bulkErr);
+                    await registerBulkMembers(user.id, team.id, additionalMembers, "PENDING");
                 }
             }
 

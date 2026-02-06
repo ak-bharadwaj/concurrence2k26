@@ -14,7 +14,7 @@ export async function getNextAvailableQR(amount: number = 800) {
             .limit(1)
             .maybeSingle();
 
-        if (error) throw error;
+        if (error) throw new Error(error.message);
         if (!qr) return null;
 
         // Reverting to blocking await to prevent serverless execution freeze issues
@@ -38,7 +38,7 @@ export async function resetQRUsage() {
     const { error } = await supabase
         .from("qr_codes")
         .update({ today_usage: 0 });
-    if (error) throw error;
+    if (error) throw new Error(error.message);
     return true;
 }
 
@@ -260,7 +260,7 @@ export async function submitPayment(userId: string, paymentData: {
             .select("*, teams(*)")
             .single();
 
-        if (userErr) throw userErr;
+        if (userErr) throw new Error(userErr.message);
 
         // If this user is a MEMBER of a team, and the team is INDIVIDUAL payment, 
         // we might want to check if they are the last one to pay (not required for now)
@@ -299,7 +299,7 @@ export async function updateStatus(
         .select("*, teams!team_id(*)")
         .single();
 
-    if (error) throw error;
+    if (error) throw new Error(error.message);
     if (!user) return null;
 
     if (newStatus === "APPROVED" && user.role === "LEADER" && user.teams?.payment_mode === "BULK" && user.team_id) {
@@ -370,14 +370,14 @@ export async function approveTeamPayment(
         .select()
         .single();
 
-    if (teamErr) throw teamErr;
+    if (teamErr) throw new Error(teamErr.message);
 
     const { error: membersErr } = await supabase
         .from("users")
         .update({ status: "APPROVED", verified_by: adminId })
         .eq("team_id", teamId);
 
-    if (membersErr) throw membersErr;
+    if (membersErr) throw new Error(membersErr.message);
 
     return team;
 }
@@ -400,7 +400,7 @@ export async function getActiveEmailAccounts() {
         .select("*")
         .eq("is_active", true);
 
-    if (error) throw error;
+    if (error) throw new Error(error.message);
     return data;
 }
 
@@ -452,7 +452,7 @@ export async function getJoinRequests(teamId: string, status: 'PENDING' | 'ACCEP
 
     if (error) {
         console.error("Error fetching join requests:", error);
-        throw error;
+        throw new Error(error.message);
     }
 
     return (data || []).map(req => {
@@ -473,7 +473,7 @@ export async function getUserJoinRequest(userId: string) {
         .eq("status", 'PENDING')
         .maybeSingle();
 
-    if (error) throw error;
+    if (error) throw new Error(error.message);
     return data;
 }
 
@@ -484,7 +484,7 @@ export async function respondToJoinRequest(requestId: string, status: 'ACCEPTED'
         .eq("id", requestId)
         .single();
 
-    if (reqErr) throw reqErr;
+    if (reqErr) throw new Error(reqErr.message);
 
     if (status === 'ACCEPTED') {
         const { data: team } = await supabase.from("teams").select("max_members, leader_id, users!leader_id(status)").eq("id", request.team_id).single();
@@ -506,7 +506,7 @@ export async function respondToJoinRequest(requestId: string, status: 'ACCEPTED'
                 })
                 .eq("id", request.user_id);
 
-            if (userErr) throw userErr;
+            if (userErr) throw new Error(userErr.message);
         }
 
         if (count !== null && count + 1 >= currentMax) {
@@ -524,7 +524,7 @@ export async function respondToJoinRequest(requestId: string, status: 'ACCEPTED'
         .update({ status: status })
         .eq("id", requestId);
 
-    if (updateErr) throw updateErr;
+    if (updateErr) throw new Error(updateErr.message);
 
     const targetEmail = request.users?.email || request.candidate_data?.email;
     const targetName = request.users?.name || request.candidate_data?.name || "Warrior";
@@ -703,7 +703,7 @@ export async function addMemberToTeam(memberData: any, teamId: string) {
             .select()
             .single();
 
-        if (iErr) throw iErr;
+        if (iErr) throw new Error(iErr.message);
         return newUser;
     }
 }
