@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS public.teams (
     unique_code text UNIQUE NOT NULL,
     leader_id uuid, -- Will link to users
     payment_mode text DEFAULT 'INDIVIDUAL', -- INDIVIDUAL, BULK
-    max_members integer DEFAULT 5,
+    max_members integer DEFAULT 4,
     created_at timestamp with time zone DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 

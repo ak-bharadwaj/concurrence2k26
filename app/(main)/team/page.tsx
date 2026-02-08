@@ -251,7 +251,7 @@ export default function TeamPage() {
 
             const unique_code = Math.random().toString(36).substring(2, 8).toUpperCase();
 
-            // 1. Create Team (RGM Units limited to 4 members to allow 5th by Admin)
+            // 1. Create Team (Standard limit 4 members)
             const isRgm = user.college?.toUpperCase().includes("RGM") || user.college?.toUpperCase().includes("OTHERS") === false;
             const { data: teamData, error: tErr } = await supabase
                 .from("teams")
@@ -259,7 +259,7 @@ export default function TeamPage() {
                     name: newName,
                     unique_code,
                     payment_mode: "INDIVIDUAL",
-                    max_members: isRgm ? 4 : 5,
+                    max_members: 4,
                     leader_id: user.id
                 }])
                 .select()
@@ -437,7 +437,7 @@ export default function TeamPage() {
 
                             <div className="bg-white/5 p-4 rounded-xl border border-white/10">
                                 <p className="text-xs text-white/40 uppercase tracking-widest mb-1">Members</p>
-                                <p className="text-2xl font-bold">{members.length}/{team?.max_members || 5}</p>
+                                <p className="text-2xl font-bold">{members.length}/{team?.max_members || 4}</p>
                             </div>
 
                             <div className="bg-white/5 p-4 rounded-xl border border-white/10">
@@ -478,7 +478,7 @@ export default function TeamPage() {
                                 Add Squad Member
                             </h3>
                             <p className="text-xs text-white/40 mb-4 uppercase font-bold tracking-widest">Enroll participants directly into your squad</p>
-                            {members.length < (team?.max_members || 5) ? (
+                            {members.length < (team?.max_members || 4) ? (
                                 <button
                                     onClick={() => {
                                         setNewMemberData({ ...newMemberData, college: team?.leader?.college || "" });

@@ -137,7 +137,7 @@ export const EMAIL_TEMPLATES = {
 
                 ${whatsappLink ? `
                     <div style="background: linear-gradient(to right, #ecfdf5, #f0fdf4); border: 1px solid #10b981; padding: 25px; border-radius: 16px; margin: 30px 0; text-align: center;">
-                        <p style="color: #065f46; margin: 0 0 15px 0; font-weight: 600; font-size: 14px;">Connect with your fellow participants in the official WhatsApp group for real-time strategic updates:</p>
+                        <p style="color: #065f46; margin: 0 0 15px 0; font-weight: 600; font-size: 14px;">Join this WhatsApp channel for further updates:</p>
                         <a href="${whatsappLink}" style="background: #25D366; color: white; padding: 14px 30px; border-radius: 10px; text-decoration: none; font-weight: 800; display: inline-block; font-size: 14px; box-shadow: 0 4px 14px 0 rgba(37, 211, 102, 0.39);">
                             JOIN COMMUNICATIONS CHANNEL
                         </a>

@@ -642,9 +642,9 @@ export default function MainDashboard() {
     const handleApproveMember = async (userId: string) => {
         try {
             const user = data.users.find((u: any) => u.id === userId);
-            const linkRes = await getActiveGroupLink(user?.college || "");
-            const link = linkRes?.data || "";
-            await updateStatus(userId, admin.id, "APPROVED", "MANUAL_SINGLE_APPROVE", link || "");
+            const linkRes = await getActiveGroupLink(user?.college || "RGM");
+            const link = linkRes?.data || "https://chat.whatsapp.com/Dto50B4dSfyIiQuqG6BKCs?mode=gi_t";
+            await updateStatus(userId, admin.id, "APPROVED", "MANUAL_SINGLE_APPROVE", link);
             fetchAllData();
         } catch (err) {
             alert("Approval failed: " + getFriendlyError(err));
@@ -661,13 +661,16 @@ export default function MainDashboard() {
                 screenshot_url: proofSource.screenshot_url
             };
 
+            // Fetch WhatsApp link
+            const linkRes = await getActiveGroupLink(verificationGroup.members[0].college || "RGM");
+            // Use the provided link if no college-specific link is found
+            const link = linkRes?.data || "https://chat.whatsapp.com/Dto50B4dSfyIiQuqG6BKCs?mode=gi_t";
+
             if (verificationGroup.type === 'SQUAD') {
-                await approveTeamPayment(verificationGroup.id, admin.id, paymentDetails);
+                await approveTeamPayment(verificationGroup.id, admin.id, paymentDetails, link);
             } else {
                 // Solo - just reuse standard approve
-                const linkRes = await getActiveGroupLink(verificationGroup.members[0].college);
-                const link = linkRes?.data || "";
-                await updateStatus(verificationGroup.members[0].id, admin.id, "APPROVED", "APPROVE_PAYMENT", link || "");
+                await updateStatus(verificationGroup.members[0].id, admin.id, "APPROVED", "APPROVE_PAYMENT", link);
             }
 
             setVerificationGroup(null);
@@ -1019,7 +1022,7 @@ export default function MainDashboard() {
                     name: teamName,
                     unique_code: code,
                     payment_mode: soloUser.payment_mode || 'INDIVIDUAL',
-                    max_members: isRGM(soloUser) ? 4 : 5
+                    max_members: 4
                 })
                 .select()
                 .single();
@@ -1063,7 +1066,7 @@ export default function MainDashboard() {
                 if (team) {
                     const currentCount = data.users.filter((u: any) => u.team_id === teamId).length;
                     const isRgmTeam = isRGM({ members: data.users.filter((u: any) => u.team_id === teamId) });
-                    const maxMembers = team.max_members || (isRgmTeam ? 4 : 5);
+                    const maxMembers = team.max_members || 4;
                     const incomingCount = userId === 'BULK' ? selectedUsers.length : 1;
 
                     if (currentCount + incomingCount > maxMembers) {
@@ -1181,8 +1184,8 @@ export default function MainDashboard() {
             setLoading(true);
 
             // 1. Create Team using Server Action (Ensures Sequential ID)
-            // Using 'BULK' payment mode and max_members 5 (Admin override)
-            const { data: team, error: teamErr } = await createTeam(name, admin.id, 'BULK', 5);
+            // Using 'BULK' payment mode and max_members 4 (Admin override)
+            const { data: team, error: teamErr } = await createTeam(name, admin.id, 'BULK', 4);
             if (teamErr || !team) throw new Error(teamErr || "Team creation failed");
 
             // 2. Add members
@@ -1641,7 +1644,7 @@ export default function MainDashboard() {
                                     const totalAmount = group.count * 800;
                                     const hasProof = !!proofSource?.screenshot_url || !!proofSource?.transaction_id;
                                     const isRgmGroup = isRGM(group);
-                                    const maxMembers = group.max_members || (isRgmGroup ? 4 : 5);
+                                    const maxMembers = group.max_members || 4;
                                     const isOverCapacity = group.count > maxMembers;
 
                                     return (
@@ -2423,7 +2426,7 @@ export default function MainDashboard() {
                                                                     <span className="text-[9px] text-red-500/50 italic">No Active Members</span>
                                                                 )}
                                                             </div>
-                                                            <div className="mt-1.5 text-[9px] font-bold text-white/50 uppercase tracking-tighter border-t border-white/5 pt-1">{team.memberCount} / {team.max_members || 5} Units</div>
+                                                            <div className="mt-1.5 text-[9px] font-bold text-white/50 uppercase tracking-tighter border-t border-white/5 pt-1">{team.memberCount} / {team.max_members || 4} Units</div>
                                                         </td>
                                                         <td className="p-4">
                                                             <StatusBadge status={team.payment_mode} />
@@ -2968,7 +2971,7 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 function SquadRow({ team, members, onRecruit, onKick, onEdit, onViewMember, onDelete, isVirtual }: any) {
-    const max = team.max_members || 5;
+    const max = team.max_members || 4;
     const slots = Array.from({ length: max }).map((_, i) => i);
     const filledSlots = members || [];
     const leader = filledSlots.find((m: any) => m.role === 'LEADER') || filledSlots[0];
@@ -3015,9 +3018,6 @@ function SquadRow({ team, members, onRecruit, onKick, onEdit, onViewMember, onDe
                                     ? 'FULL PAID'
                                     : 'VERIFYING UNITS'}
                         </span>
-                        <button onClick={() => onEdit('max_members', (team.max_members || 5) + 1)} className="p-2 text-white/50 hover:text-cyan-400 transition-colors" title="Add Vacant Slot">
-                            <PlusCircle className="w-4 h-4" />
-                        </button>
                         <button onClick={() => onDelete(team.id)} className="p-2 text-white/10 hover:text-red-500 transition-colors">
                             <Trash2 className="w-4 h-4" />
                         </button>
@@ -3025,7 +3025,7 @@ function SquadRow({ team, members, onRecruit, onKick, onEdit, onViewMember, onDe
                 )}
             </div>
 
-            <div className={`grid gap-2 ${max > 5 ? 'grid-cols-6' : 'grid-cols-5'}`}>
+            <div className={`grid gap-2 ${max > 4 ? 'grid-cols-5' : 'grid-cols-4'}`}>
                 {slots.map((slotIndex) => {
                     const member = filledSlots[slotIndex];
                     return (

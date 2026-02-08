@@ -36,7 +36,7 @@ export default function TermsPage() {
                                 <li>Participants must be currently enrolled students with a valid student ID.</li>
                                 <li>Registration fee of ₹800 per participant is mandatory and non-refundable (except in case of event cancellation).</li>
                                 <li>Each participant can register only once. Duplicate registrations will be rejected.</li>
-                                <li>Teams must consist of 2-5 members. Solo participants will be grouped at the venue.</li>
+                                <li>Teams must consist of 2-4 members. Solo participants will be grouped at the venue.</li>
                                 <li>All team members must complete individual registration and payment.</li>
                             </ul>
                         </section>

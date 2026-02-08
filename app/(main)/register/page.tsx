@@ -431,7 +431,7 @@ function RegisterPageContent() {
 
             // Check team capacity
             const currentMembers = (team as any).members?.length || 0;
-            const maxMembers = team.max_members || 5;
+            const maxMembers = team.max_members || 4;
 
             if (currentMembers >= maxMembers) {
                 setError(`Team "${team.name}" is full (${currentMembers}/${maxMembers} members)`);
@@ -453,7 +453,7 @@ function RegisterPageContent() {
         if (loading) return;
 
         const currentTotal = (teamDetails?.members?.length || 1) + additionalMembers.length;
-        const maxLimit = teamDetails?.max_members || 5;
+        const maxLimit = teamDetails?.max_members || 4;
 
         if (currentTotal >= maxLimit) {
             return alert(`Maximum capacity reached (${maxLimit} warriors).`);
@@ -602,9 +602,7 @@ function RegisterPageContent() {
 
                 // 2. Create Team
                 setLoadingMessage("Forging Squad Designation...");
-                const isRgm = userParams.college.toUpperCase().includes("RGM");
-                const teamResp = await createTeam(teamName, user.id, "BULK", isRgm ? 4 : 5);
-                if (teamResp.error) throw new Error(teamResp.error);
+                const teamResp = await createTeam(teamName, user.id, "BULK", 4); // Max members set to 4 for all            if (teamResp.error) throw new Error(teamResp.error);
                 const team = teamResp.data;
                 createdTeamId = team.id;
 
@@ -773,7 +771,7 @@ function RegisterPageContent() {
                     {step === 0 && (
                         <motion.div key="s0" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="grid grid-cols-1 gap-6 px-2">
                             <ModeCard icon={User} title="Alone Warrior" desc="Fly solo. We'll find you a dream team at the event." price="₹800" color="cyan" onClick={() => handleModeSelect("SOLO")} />
-                            <ModeCard icon={Users} title="Elite Squad" desc="Bring your own team of 2-5 warriors." price="₹800/Member" color="purple" onClick={() => handleModeSelect("SQUAD")} />
+                            <ModeCard icon={Users} title="Elite Squad" desc="Bring your own team of 2-4 warriors." price="₹800/Member" color="purple" onClick={() => handleModeSelect("SQUAD")} />
                         </motion.div>
                     )}
 
@@ -887,7 +885,7 @@ function RegisterPageContent() {
                                                     <h3 className="text-xl sm:text-2xl font-black text-purple-400 tracking-tight">{searchedTeam.name}</h3>
                                                     <div className="inline-block px-4 py-2 bg-green-500/10 border border-green-500/20 rounded-xl">
                                                         <p className="text-xs font-black text-green-400 uppercase tracking-widest">
-                                                            {searchedTeam.members?.length || 0}/{searchedTeam.max_members || 5} Slots Filled
+                                                            {searchedTeam.members?.length || 0}/{searchedTeam.max_members || 4} Slots Filled
                                                         </p>
                                                     </div>
                                                     <button onClick={handleTeamJoinProceed} className="w-full min-h-[56px] py-4 px-6 bg-white text-black font-black rounded-xl flex items-center justify-center gap-3 text-base shadow-xl relative z-10 active:scale-95 transition-transform hover:bg-gray-100">
@@ -986,7 +984,7 @@ function RegisterPageContent() {
                                         {additionalMembers.map((m, i) => (
                                             <MemberRow key={`local-${i}`} name={m.name} role="MEMBER" status="UNPAID" color="red" onRemove={() => setAdditionalMembers(additionalMembers.filter((_, idx) => idx !== i))} />
                                         ))}
-                                        {additionalMembers.length < 4 && (
+                                        {(teamDetails?.members?.length || 1) + additionalMembers.length < (teamDetails?.max_members || 4) && (
                                             <button onClick={() => setShowAddMemberModal(true)} className="w-full py-3 border border-dashed border-white/20 rounded-xl text-white/40 font-bold hover:text-white hover:border-white/40 transition-all flex items-center justify-center gap-2 text-[10px] uppercase tracking-widest">
                                                 <Plus className="w-4 h-4" /> Add Squad Member
                                             </button>

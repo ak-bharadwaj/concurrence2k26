@@ -48,7 +48,7 @@ export async function resetQRUsage() {
     }
 }
 
-export async function createTeam(name: string, leaderId: string | null, paymentMode: "INDIVIDUAL" | "BULK" = "INDIVIDUAL", maxMembers: number = 5) {
+export async function createTeam(name: string, leaderId: string | null, paymentMode: "INDIVIDUAL" | "BULK" = "INDIVIDUAL", maxMembers: number = 4) {
     try {
         const supabase = createAdminClient();
         // Generate unique 6-digit code
@@ -428,7 +428,8 @@ export async function updateStatus(
 export async function approveTeamPayment(
     teamId: string,
     adminId: string,
-    paymentDetails: { transaction_id: string | null; screenshot_url: string | null }
+    paymentDetails: { transaction_id: string | null; screenshot_url: string | null },
+    whatsappLink?: string
 ) {
     try {
         const cookieStore = await cookies();
@@ -453,6 +454,24 @@ export async function approveTeamPayment(
             .eq("team_id", teamId);
 
         if (membersErr) return { error: membersErr.message };
+
+        // Send approval emails to all team members
+        const { data: members } = await supabase
+            .from("users")
+            .select("*")
+            .eq("team_id", teamId)
+            .eq("status", "APPROVED");
+
+        if (members) {
+            const qrUrl = (uid: string) => `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${uid}`;
+            members.forEach(m => {
+                sendEmail(
+                    m.email,
+                    "Registration Approved! 🎉 - Hackathon 2K26",
+                    EMAIL_TEMPLATES.PAYMENT_VERIFIED(m.name, qrUrl(m.id), m.reg_no, whatsappLink)
+                );
+            });
+        }
 
         return { data: team };
     } catch (err: any) {
@@ -626,9 +645,9 @@ export async function respondToJoinRequest(requestId: string, status: 'ACCEPTED'
             const team = teamsFound?.[0];
             const { count } = await supabase.from("users").select("*", { count: 'exact', head: true }).eq("team_id", request.team_id);
 
-            const currentMax = team?.max_members || 5;
-            if (count !== null && count >= currentMax) {
-                return { error: `Cannot accept: Squad is already at maximum capacity (${currentMax}).` };
+            const maxMembers = team?.max_members || 4;
+            if (count !== null && count >= maxMembers) {
+                return { error: `Cannot accept: Squad is already at maximum capacity (${maxMembers}).` };
             }
 
             if (request.user_id) {
@@ -643,7 +662,7 @@ export async function respondToJoinRequest(requestId: string, status: 'ACCEPTED'
                 if (userErr) return { error: userErr.message };
             }
 
-            if (count !== null && count + 1 >= currentMax) {
+            if (count !== null && count + 1 >= maxMembers) {
                 await supabase
                     .from("join_requests")
                     .update({ status: 'REJECTED' })
@@ -827,7 +846,7 @@ export async function addMemberToTeam(memberData: any, teamId: string) {
         const team = teamsFound?.[0];
         const { count } = await supabase.from("users").select("*", { count: 'exact', head: true }).eq("team_id", teamId);
 
-        if (count !== null && count >= (team?.max_members || 5)) {
+        if (count !== null && count >= (team?.max_members || 4)) {
             return { error: "Oops, looks like you're late! This squad is full now." };
         }
 

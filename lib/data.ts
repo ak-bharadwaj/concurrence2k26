@@ -72,7 +72,7 @@ export const phases: Phase[] = [
       "Present your innovative idea",
       "5-minute pitch + 3-minute Q&A",
       "Focus on problem-solving approach",
-      "Team size: 3-5 members",
+      "Team size: 2-4 members",
     ],
     outcome: "Top teams qualify for CodeJam",
   },

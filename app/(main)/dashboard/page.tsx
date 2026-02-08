@@ -448,7 +448,7 @@ export default function DashboardPage() {
                                         {/* Members Grid */}
 
                                         <div className="grid grid-cols-1 gap-3">
-                                            {Array.from({ length: 5 }).map((_, i) => {
+                                            {Array.from({ length: team.max_members || 4 }).map((_, i) => {
                                                 const member = team.members?.[i];
                                                 const isLeader = member?.role === 'LEADER';
 
@@ -513,7 +513,7 @@ export default function DashboardPage() {
                                             </div>
 
                                             {/* Empty shadow slots to emphasize solo status */}
-                                            {Array.from({ length: 4 }).map((_, i) => (
+                                            {Array.from({ length: 3 }).map((_, i) => (
                                                 <div key={i} className="flex items-center gap-4 p-3 border border-white/5 rounded-2xl opacity-10 filter grayscale">
                                                     <div className="w-12 h-12 rounded-xl bg-white/5 flex items-center justify-center shrink-0">
                                                         <ShieldCheck className="w-5 h-5 text-white/20" />

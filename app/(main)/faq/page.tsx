@@ -15,11 +15,11 @@ export default function FAQPage() {
             questions: [
                 {
                     q: "What is the registration fee?",
-                    a: "The registration fee is ₹800 per participant. You can register as a solo participant or as part of a team (2-5 members)."
+                    a: "The registration fee is ₹800 per participant. You can register as a solo participant or as part of a team (2-4 members)."
                 },
                 {
                     q: "Can I register as a team?",
-                    a: "Yes! You can form a team of 2-5 members. One person creates the team and shares the team code with others to join."
+                    a: "Yes! You can form a team of 2-4 members. One person creates the team and shares the team code with others to join."
                 },
                 {
                     q: "How do I join an existing team?",

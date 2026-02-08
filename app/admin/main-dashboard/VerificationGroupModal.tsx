@@ -21,7 +21,7 @@ export function VerificationGroupModal({ group, onClose, onApprove, onReject, on
     const totalAmount = group.members.length * 800;
 
     const isRgm = group.members.some((m: any) => m.college?.toUpperCase().includes('RGM'));
-    const maxMembers = group.max_members || (isRgm ? 4 : 5);
+    const maxMembers = group.max_members || 4;
     const isOverCapacity = group.members.length > maxMembers;
 
     return (
