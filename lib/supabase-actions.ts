@@ -162,9 +162,8 @@ export async function registerUser(userData: {
 
         const existingUser = usersFound?.[0];
 
-        if (existingUser && ["APPROVED", "PENDING", "VERIFYING"].includes(existingUser.status)) {
-            return { error: "This registration (Email) is already locked (Approved/Pending). Please contact support for changes." };
-        }
+        // ALLOW RE-REGISTRATION: No longer blocking existing users
+        // Users can register multiple times - upsert will update existing records
 
 
 
@@ -240,21 +239,8 @@ export async function purgeUnpaidUsers() {
 
 export async function checkUserAvailability(email: string, phone: string) {
     try {
-        const supabase = createAdminClient();
-        const { data, error } = await supabase
-            .from("users")
-            .select("id, status")
-            .or(`email.eq.${email.trim().toLowerCase()}`);
-
-        if (error) return { error: error.message };
-
-        const lockedStatuses = ["PENDING", "APPROVED", "VERIFYING"];
-        const conflict = data?.find(u => lockedStatuses.includes(u.status));
-
-        if (conflict) {
-            return { error: "User already registered or payment pending." };
-        }
-
+        // ALLOW RE-REGISTRATION: No longer blocking existing users
+        // Users can register multiple times (e.g., for different events or to update details)
         return { data: true };
     } catch (err: any) {
         return { error: err.message || "Availability check failed." };
