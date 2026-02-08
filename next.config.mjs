@@ -4,19 +4,14 @@ const withBundleAnalyzer = (await import('@next/bundle-analyzer')).default({
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // 1. Enable React Compiler for better runtime performance (React 19 feature)
+  // 1. Package import optimizations
   experimental: {
-    reactCompiler: true,
     optimizePackageImports: ['lucide-react', 'recharts', 'framer-motion', '@radix-ui/react-icons'],
   },
 
   // 2. Build optimizations
   typescript: {
     ignoreBuildErrors: true,
-  },
-  srl: {
-    // Suppress heavy logs during dev
-    silent: true
   },
 
   // 3. Image Optimization (Zero visual loss, faster loading)
