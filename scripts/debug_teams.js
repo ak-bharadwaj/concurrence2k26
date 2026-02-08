@@ -23,7 +23,7 @@ async function testCreateTeam() {
             name: "Debug Team " + Date.now(),
             unique_code: code,
             payment_mode: "BULK",
-            max_members: 5,
+            max_members: 4,
             status: "PENDING"
             // omitted leader_id for now to test basic insert, or use a dummy UUID if needed
         }])

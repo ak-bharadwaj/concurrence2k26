@@ -1070,7 +1070,7 @@ export default function MainDashboard() {
                     const incomingCount = userId === 'BULK' ? selectedUsers.length : 1;
 
                     if (currentCount + incomingCount > maxMembers) {
-                        throw new Error(`Capacity Limit Exceeded! This squad is capped at ${maxMembers} warriors. ${isRgmTeam ? 'Increase capacity first to add a 5th member.' : ''}`);
+                        throw new Error(`Capacity Limit Exceeded! This squad is capped at ${maxMembers} warriors.`);
                     }
                 }
             }
@@ -1758,7 +1758,7 @@ export default function MainDashboard() {
                                         const hasProof = !!proofSource?.screenshot_url || !!proofSource?.transaction_id;
                                         const isAllPaid = group.members.every((m: any) => m.status === 'APPROVED');
                                         const isRgmGroup = isRGM(group);
-                                        const maxMembers = isRgmGroup ? 4 : 5;
+                                        const maxMembers = group.max_members || 4;
                                         const isOverCapacity = group.count > maxMembers;
 
                                         return (
@@ -3025,7 +3025,7 @@ function SquadRow({ team, members, onRecruit, onKick, onEdit, onViewMember, onDe
                 )}
             </div>
 
-            <div className={`grid gap-2 ${max > 4 ? 'grid-cols-5' : 'grid-cols-4'}`}>
+            <div className="grid gap-2 grid-cols-4">
                 {slots.map((slotIndex) => {
                     const member = filledSlots[slotIndex];
                     return (
