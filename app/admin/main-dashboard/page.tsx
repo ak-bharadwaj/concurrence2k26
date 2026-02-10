@@ -330,7 +330,7 @@ export default function MainDashboard() {
             if (activeTab === "GROUPS") {
                 table = "group_links";
                 dataToInsert = {
-                    college: formData.college || "RGM",
+                    college_name: formData.college || "RGM",
                     whatsapp_link: formData.whatsapp_link
                 };
             }
@@ -2542,8 +2542,8 @@ export default function MainDashboard() {
                         renderMobileCard={(g: any) => (
                             <div key={g.id} className="bg-white/5 border border-white/10 rounded-xl p-4 flex items-center justify-between">
                                 <div>
-                                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${g.college === 'RGM' ? 'bg-cyan-500/10 text-cyan-400' : 'bg-purple-500/10 text-purple-400'}`}>
-                                        {g.college}
+                                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${g.college_name === 'RGM' ? 'bg-cyan-500/10 text-cyan-400' : 'bg-purple-500/10 text-purple-400'}`}>
+                                        {g.college_name}
                                     </span>
                                     <div className="mt-2 text-[10px] font-mono text-white/70 truncate max-w-[150px]">{g.whatsapp_link}</div>
                                 </div>
@@ -2560,8 +2560,8 @@ export default function MainDashboard() {
                         renderRow={(g: any) => (
                             <tr key={g.id} className="border-b border-white/5">
                                 <td className="py-4 px-4">
-                                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${g.college === 'RGM' ? 'bg-cyan-500/10 text-cyan-400' : 'bg-purple-500/10 text-purple-400'}`}>
-                                        {g.college}
+                                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${g.college_name === 'RGM' ? 'bg-cyan-500/10 text-cyan-400' : 'bg-purple-500/10 text-purple-400'}`}>
+                                        {g.college_name}
                                     </span>
                                 </td>
                                 <td className="py-4 px-4 text-xs font-mono text-white/70">{g.whatsapp_link}</td>

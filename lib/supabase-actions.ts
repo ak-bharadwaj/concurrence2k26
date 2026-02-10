@@ -469,14 +469,13 @@ export async function getActiveGroupLink(college: string) {
     try {
         const supabase = createAdminClient();
         const { data, error } = await supabase
-            .from("whatsapp_links")
-            .select("link")
-            .eq("college", college)
-            .eq("is_active", true)
+            .from("group_links")
+            .select("whatsapp_link")
+            .eq("college_name", college)
             .maybeSingle();
 
         if (error) return { error: error.message };
-        return { data: data?.link || null };
+        return { data: data?.whatsapp_link || null };
     } catch (err: any) {
         return { error: err.message };
     }
