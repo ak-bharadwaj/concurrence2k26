@@ -431,9 +431,8 @@ export async function approveTeamPayment(
 
         const { data: teamFound, error: teamErr } = await supabase
             .from("teams")
-            .update({}) // Status removed, column doesn't exist
+            .select("*")
             .eq("id", teamId)
-            .select()
             .limit(1);
 
         if (teamErr) return { error: teamErr.message };
