@@ -602,7 +602,9 @@ function RegisterPageContent() {
 
                 // 2. Create Team
                 setLoadingMessage("Forging Squad Designation...");
-                const teamResp = await createTeam(teamName, user.id, "BULK", 4); // Max members set to 4 for all            if (teamResp.error) throw new Error(teamResp.error);
+                const teamResp = await createTeam(teamName, user.id, "BULK", 4); // Max members set to 4 for all
+                if (teamResp.error) throw new Error(teamResp.error);
+                if (!teamResp.data) throw new Error("Team creation returned no data");
                 const team = teamResp.data;
                 createdTeamId = team.id;
 
@@ -676,11 +678,30 @@ function RegisterPageContent() {
 
         } catch (err: any) {
             console.error("Critical Registration Failure:", err);
+            console.error("Error details:", {
+                message: err.message,
+                stack: err.stack,
+                name: err.name,
+                regMode,
+                squadSubMode,
+                userId,
+                createdUserId,
+                createdTeamId
+            });
             setError(getFriendlyError(err));
 
-            if (createdUserId) {
-                if (createdTeamId) await deleteTeam(createdTeamId);
-                await deleteUser(createdUserId);
+            // Rollback created records
+            try {
+                if (createdUserId) {
+                    console.log("Rolling back user:", createdUserId);
+                    if (createdTeamId) {
+                        console.log("Rolling back team:", createdTeamId);
+                        await deleteTeam(createdTeamId);
+                    }
+                    await deleteUser(createdUserId);
+                }
+            } catch (rollbackErr: any) {
+                console.error("Rollback failed:", rollbackErr);
             }
         } finally {
             setLoading(false);
@@ -771,7 +792,7 @@ function RegisterPageContent() {
                     {step === 0 && (
                         <motion.div key="s0" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="grid grid-cols-1 gap-6 px-2">
                             <ModeCard icon={User} title="Alone Warrior" desc="Fly solo. We'll find you a dream team at the event." price="₹800" color="cyan" onClick={() => handleModeSelect("SOLO")} />
-                            <ModeCard icon={Users} title="Elite Squad" desc="Bring your own team of 2-4 warriors." price="₹800/Member" color="purple" onClick={() => handleModeSelect("SQUAD")} />
+                            <ModeCard icon={Users} title="Elite Squad" desc="Bring your own team of 2-5 warriors." price="₹800/Member" color="purple" onClick={() => handleModeSelect("SQUAD")} />
                         </motion.div>
                     )}
 

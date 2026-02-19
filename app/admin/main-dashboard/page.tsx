@@ -3018,6 +3018,14 @@ function SquadRow({ team, members, onRecruit, onKick, onEdit, onViewMember, onDe
                                     ? 'FULL PAID'
                                     : 'VERIFYING UNITS'}
                         </span>
+                        <button
+                            onClick={() => onEdit('max_members', Math.min((team.max_members || 4) + 1, 5))}
+                            className="p-2 text-white/50 hover:text-cyan-400 transition-colors"
+                            title="Add Vacant Slot"
+                            disabled={team.max_members >= 5}
+                        >
+                            <PlusCircle className="w-4 h-4" />
+                        </button>
                         <button onClick={() => onDelete(team.id)} className="p-2 text-white/10 hover:text-red-500 transition-colors">
                             <Trash2 className="w-4 h-4" />
                         </button>
@@ -3025,7 +3033,7 @@ function SquadRow({ team, members, onRecruit, onKick, onEdit, onViewMember, onDe
                 )}
             </div>
 
-            <div className="grid gap-2 grid-cols-4">
+            <div className={`grid gap-2 ${max > 4 ? 'grid-cols-5' : 'grid-cols-4'}`}>
                 {slots.map((slotIndex) => {
                     const member = filledSlots[slotIndex];
                     return (
