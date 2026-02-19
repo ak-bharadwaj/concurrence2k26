@@ -50,7 +50,7 @@ import {
 } from "@/lib/supabase-actions";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import Image from "next/image";
+
 import { getFriendlyError } from "@/lib/error-handler";
 
 type Step = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
@@ -1101,7 +1101,7 @@ function RegisterPageContent() {
                                         <div className="relative group">
                                             <div className="bg-white p-4 rounded-3xl shadow-[0_0_50px_rgba(255,255,255,0.15)] transition-transform duration-500 hover:scale-105">
                                                 {assignedQR?.qr_image_url ? (
-                                                    <Image src={assignedQR.qr_image_url} alt="Pay" width={280} height={280} className="rounded-2xl" />
+                                                    <img src={assignedQR.qr_image_url} alt="Pay" width={280} height={280} className="rounded-2xl" />
                                                 ) : (
                                                     <div className="w-[280px] h-[280px] bg-neutral-200 flex items-center justify-center text-black font-black text-[10px] uppercase text-center p-4 rounded-2xl">QR Signal Lost. Refresh.</div>
                                                 )}

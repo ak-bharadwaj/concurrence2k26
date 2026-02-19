@@ -1,6 +1,6 @@
 
 import { X, CheckCircle2, AlertCircle, ExternalLink, Calendar, Users, Crown, AlertTriangle } from "lucide-react";
-import Image from "next/image";
+
 import React, { useState } from "react";
 
 export function VerificationGroupModal({ group, onClose, onApprove, onReject, onApproveMember }: {
@@ -43,11 +43,10 @@ export function VerificationGroupModal({ group, onClose, onApprove, onReject, on
                             <div className="relative rounded-2xl overflow-hidden border border-white/10 bg-black/20 group min-h-[250px] sm:min-h-[350px]">
                                 {proofSource?.screenshot_url ? (
                                     <a href={proofSource.screenshot_url} target="_blank" rel="noreferrer" className="block w-full h-full">
-                                        <Image
+                                        <img
                                             src={proofSource.screenshot_url}
                                             alt={`Payment Proof ${idx + 1}`}
-                                            fill
-                                            className="object-contain hover:scale-105 transition-transform duration-500"
+                                            className="w-full h-full object-contain hover:scale-105 transition-transform duration-500"
                                         />
                                     </a>
                                 ) : (

@@ -40,7 +40,7 @@ import { supabase } from "@/lib/supabase";
 import { getAdminSession, adminLogout } from "@/lib/auth";
 import { updateStatus, getActiveGroupLink, deleteUser, resetQRUsage, markAttendance, fetchAttendanceReport, sendCustomUserEmail, approveTeamPayment, createTeam, deleteTeam, purgeUnpaidUsers } from "@/lib/supabase-actions";
 import { getFriendlyError } from "@/lib/error-handler";
-import Image from "next/image";
+
 import dynamic from "next/dynamic";
 
 const MemberDetailModal = dynamic(() => import("./MemberDetailModal").then(mod => mod.MemberDetailModal), { ssr: false });

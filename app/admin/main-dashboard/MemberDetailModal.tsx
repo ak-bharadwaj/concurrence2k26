@@ -1,6 +1,6 @@
 import { X, Copy, CheckCircle2, Edit3, Save } from "lucide-react";
 import React, { useState } from "react";
-import Image from "next/image";
+
 
 export function MemberDetailModal({ user, onClose, onSave }: { user: any, onClose: () => void, onSave?: (id: string, field: string, value: any) => void }) {
     const [copied, setCopied] = useState(false);
@@ -51,7 +51,7 @@ export function MemberDetailModal({ user, onClose, onSave }: { user: any, onClos
 
                     <div className="w-20 h-20 rounded-full bg-neutral-800 border-2 border-white/10 flex items-center justify-center mb-4 shadow-xl relative group">
                         {user.screenshot_url ? (
-                            <Image src={user.screenshot_url} alt="User" fill className="rounded-full object-cover" />
+                            <img src={user.screenshot_url} alt="User" className="w-full h-full rounded-full object-cover" />
                         ) : (
                             <span className="text-2xl font-black text-white/50">{user.name?.[0]}</span>
                         )}

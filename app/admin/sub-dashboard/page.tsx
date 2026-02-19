@@ -17,7 +17,7 @@ import {
 import { supabase } from "@/lib/supabase";
 import { updateStatus, getActiveGroupLink, deleteUser } from "@/lib/supabase-actions";
 import { getAdminSession, adminLogout } from "@/lib/auth";
-import Image from "next/image";
+
 import { getFriendlyError } from "@/lib/error-handler";
 
 export default function SubDashboard() {
@@ -290,7 +290,7 @@ export default function SubDashboard() {
                                                                 rel="noreferrer"
                                                                 className="w-10 h-10 rounded-lg bg-white/5 border border-white/10 overflow-hidden relative group/img shrink-0"
                                                             >
-                                                                <Image src={user.screenshot_url} alt="Proof" fill className="object-cover" />
+                                                                <img src={user.screenshot_url} alt="Proof" className="w-full h-full object-cover" />
                                                                 <div className="absolute inset-0 bg-black/60 flex items-center justify-center opacity-0 group-hover/img:opacity-100 transition-opacity">
                                                                     <Eye className="w-4 h-4" />
                                                                 </div>

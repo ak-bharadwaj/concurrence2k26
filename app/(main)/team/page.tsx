@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { getJoinRequests, respondToJoinRequest, removeMemberFromTeam, leaveTeam, updateTeamSettings, addMemberToTeam, updateMemberDetails, deleteTeam, submitPayment, getNextAvailableQR, joinTeam, requestJoinTeam } from "@/lib/supabase-actions";
 import { Loader2, Users, Crown, Copy, Check, UserMinus, LogOut, Settings, ArrowLeft, UserPlus, X, Edit3, Save, Trash2, ShieldCheck, Plus, CreditCard, Upload, Clock, Search, Mail, Phone } from "lucide-react";
-import Image from "next/image";
+
 import { motion, AnimatePresence } from "framer-motion";
 import { getFriendlyError } from "@/lib/error-handler";
 
@@ -982,7 +982,7 @@ export default function TeamPage() {
 
                                     <div className="bg-white p-3 rounded-2xl w-48 h-48 mx-auto mb-6 shadow-2xl">
                                         {assignedQR ? (
-                                            <Image
+                                            <img
                                                 src={assignedQR.qr_image_url}
                                                 alt="Payment QR"
                                                 width={200}
