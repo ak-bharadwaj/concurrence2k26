@@ -187,15 +187,23 @@ export async function registerUser(userData: {
             assigned_qr_id: userData.assigned_qr_id || null
         };
 
+        let result;
         if (existingUser) {
-            sanitizedData.id = existingUser.id;
+            result = await supabase
+                .from("users")
+                .update(sanitizedData)
+                .eq("id", existingUser.id)
+                .select()
+                .limit(1);
+        } else {
+            result = await supabase
+                .from("users")
+                .insert(sanitizedData)
+                .select()
+                .limit(1);
         }
 
-        const { data, error } = await supabase
-            .from("users")
-            .upsert(sanitizedData)
-            .select()
-            .limit(1);
+        const { data, error } = result;
 
         if (error) {
             console.error("SUPABASE ERROR in registerUser:", error);
