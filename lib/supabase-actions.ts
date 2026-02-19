@@ -153,19 +153,15 @@ export async function registerUser(userData: {
 }) {
     try {
         const supabase = createAdminClient();
-        // 1. Check for existing record by Email (our new unique anchor)
+
+        // 1. Check for existing record by Email (if we want to update it)
         const { data: usersFound } = await supabase
             .from("users")
-            .select("id, status, phone")
+            .select("id")
             .eq("email", userData.email.trim().toLowerCase())
             .limit(1);
 
         const existingUser = usersFound?.[0];
-
-        // ALLOW RE-REGISTRATION: No longer blocking existing users
-        // Users can register multiple times - upsert will update existing records
-
-
 
         // 2. Verify team_id if provided
         if (userData.team_id) {
@@ -173,8 +169,8 @@ export async function registerUser(userData: {
             if (teamErr || !teamsFound || teamsFound.length === 0) return { error: "The specified squad does not exist." };
         }
 
-        // 3. Sanitize input to prevent 'column does not exist' errors
-        const sanitizedData = {
+        // 3. Sanitize input
+        const sanitizedData: any = {
             name: userData.name,
             reg_no: userData.reg_no,
             email: userData.email,
@@ -191,17 +187,18 @@ export async function registerUser(userData: {
             assigned_qr_id: userData.assigned_qr_id || null
         };
 
+        if (existingUser) {
+            sanitizedData.id = existingUser.id;
+        }
+
         const { data, error } = await supabase
             .from("users")
-            .upsert(sanitizedData, { onConflict: 'email' })
+            .upsert(sanitizedData)
             .select()
             .limit(1);
 
         if (error) {
             console.error("SUPABASE ERROR in registerUser:", error);
-            if (error.code === '42703') {
-                return { error: "Database Sync Required: Please run the 'add_tshirt_column.sql' script in your Supabase SQL Editor." };
-            }
             return { error: error.message || "Registration failed." };
         }
 

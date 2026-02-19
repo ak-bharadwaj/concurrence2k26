@@ -3019,12 +3019,17 @@ function SquadRow({ team, members, onRecruit, onKick, onEdit, onViewMember, onDe
                                     : 'VERIFYING UNITS'}
                         </span>
                         <button
-                            onClick={() => onEdit('max_members', Math.min((team.max_members || 4) + 1, 5))}
-                            className="p-2 text-white/50 hover:text-cyan-400 transition-colors"
-                            title="Add Vacant Slot"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                const currentMax = team.max_members || 4;
+                                if (currentMax < 5) onEdit('max_members', currentMax + 1);
+                            }}
+                            className={`px-3 py-1.5 rounded-lg border text-[10px] font-black uppercase transition-all flex items-center gap-1.5 shadow-lg ${team.max_members >= 5 ? 'opacity-20 cursor-not-allowed border-white/5 bg-white/5' : 'bg-cyan-500 border-cyan-400 text-black hover:scale-105 active:scale-95 animate-pulse'}`}
+                            title="Add 5th Member Slot"
                             disabled={team.max_members >= 5}
                         >
-                            <PlusCircle className="w-4 h-4" />
+                            <Plus className="w-4 h-4" />
+                            <span>Add Slot</span>
                         </button>
                         <button onClick={() => onDelete(team.id)} className="p-2 text-white/10 hover:text-red-500 transition-colors">
                             <Trash2 className="w-4 h-4" />
