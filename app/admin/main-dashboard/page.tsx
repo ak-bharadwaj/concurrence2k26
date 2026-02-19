@@ -1690,7 +1690,7 @@ export default function MainDashboard() {
                                             {/* Preview Thumbnail */}
                                             <div className="h-24 w-full bg-black/20 rounded-xl overflow-hidden relative border border-white/5">
                                                 {hasProof ? (
-                                                    <Image src={proofSource.screenshot_url} alt="Proof" fill className="object-cover opacity-60 group-hover:opacity-100 transition-opacity" />
+                                                    <img src={proofSource.screenshot_url} alt="Proof" className="w-full h-full object-cover opacity-60 group-hover:opacity-100 transition-opacity" />
                                                 ) : (
                                                     <div className="absolute inset-0 flex items-center justify-center text-[9px] font-black uppercase text-white/50 tracking-widest">
                                                         No Proof Uploaded
@@ -1794,7 +1794,7 @@ export default function MainDashboard() {
 
                                                 <div className="h-24 w-full bg-black/20 rounded-xl overflow-hidden relative border border-white/5 mb-3">
                                                     {hasProof ? (
-                                                        <Image src={proofSource.screenshot_url} alt="Proof" fill className="object-cover opacity-60 group-hover:opacity-100 transition-opacity" />
+                                                        <img src={proofSource.screenshot_url} alt="Proof" className="w-full h-full object-cover opacity-60 group-hover:opacity-100 transition-opacity" />
                                                     ) : (
                                                         <div className="absolute inset-0 flex items-center justify-center text-[9px] font-black uppercase text-white/50 tracking-widest text-center px-4">
                                                             {isAllPaid ? 'Verification Complete' : 'Awaiting Proof Upload'}
@@ -2124,7 +2124,7 @@ export default function MainDashboard() {
                                                 <td className="py-4 px-4">
                                                     {u.screenshot_url ? (
                                                         <a href={u.screenshot_url} target="_blank" rel="noreferrer" className="w-10 h-10 rounded bg-white/5 flex items-center justify-center border border-white/10 hover:border-orange-500/50 transition-all overflow-hidden relative">
-                                                            <Image src={u.screenshot_url} alt="Proof" fill className="object-cover" />
+                                                            <img src={u.screenshot_url} alt="Proof" className="w-full h-full object-cover" />
                                                             <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
                                                                 <ExternalLink className="w-3 h-3" />
                                                             </div>
