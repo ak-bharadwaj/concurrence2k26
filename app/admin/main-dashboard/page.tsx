@@ -345,6 +345,7 @@ export default function MainDashboard() {
                     year: formData.year,
                     role: formData.role || 'MEMBER',
                     transaction_id: formData.transaction_id,
+                    tshirt_size: formData.tshirt_size,
                     status: 'APPROVED'
                 });
                 if (res.error) throw new Error(res.error);
@@ -2749,9 +2750,10 @@ export default function MainDashboard() {
                                         </div>
                                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                             <FormSelect label="Year" options={['1', '2', '3', '4']} onChange={v => setFormData({ ...formData, year: v })} />
-                                            <FormSelect label="Role" options={['MEMBER', 'LEADER']} onChange={v => setFormData({ ...formData, role: v })} />
+                                            <FormSelect label="T-Shirt Size" options={['S', 'M', 'L', 'XL', 'XXL']} onChange={v => setFormData({ ...formData, tshirt_size: v })} />
                                         </div>
-                                        <div className="grid grid-cols-1 gap-4">
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                            <FormSelect label="Role" options={['MEMBER', 'LEADER']} onChange={v => setFormData({ ...formData, role: v })} />
                                             <FormInput label="Paid To / Transaction ID" placeholder="e.g. Paid to Aman / UTR123..." onChange={v => setFormData({ ...formData, transaction_id: v })} />
                                         </div>
                                         <div className="p-3 bg-cyan-500/10 border border-cyan-500/20 rounded-xl">
