@@ -38,7 +38,7 @@ import { Scanner } from "@yudiel/react-qr-scanner";
 import ExcelJS from "exceljs";
 import { supabase } from "@/lib/supabase";
 import { getAdminSession, adminLogout } from "@/lib/auth";
-import { updateStatus, getActiveGroupLink, deleteUser, resetQRUsage, markAttendance, fetchAttendanceReport, sendCustomUserEmail, approveTeamPayment, createTeam, deleteTeam, purgeUnpaidUsers } from "@/lib/supabase-actions";
+import { updateStatus, getActiveGroupLink, deleteUser, resetQRUsage, markAttendance, fetchAttendanceReport, sendCustomUserEmail, approveTeamPayment, createTeam, deleteTeam, purgeUnpaidUsers, registerUser } from "@/lib/supabase-actions";
 import { getFriendlyError } from "@/lib/error-handler";
 
 import dynamic from "next/dynamic";
@@ -334,6 +334,24 @@ export default function MainDashboard() {
                     whatsapp_link: formData.whatsapp_link
                 };
             }
+            if (activeTab === "USERS") {
+                const res = await registerUser({
+                    name: formData.name,
+                    email: formData.email,
+                    phone: formData.phone,
+                    reg_no: formData.reg_no,
+                    college: formData.college || "RGM",
+                    branch: formData.branch,
+                    year: formData.year,
+                    role: formData.role || 'MEMBER',
+                    status: 'APPROVED'
+                });
+                if (res.error) throw new Error(res.error);
+                setShowModal(null);
+                setFormData({});
+                fetchAllData();
+                return;
+            }
             if (activeTab === "TEAMS") {
                 table = "teams";
                 dataToInsert = {
@@ -521,18 +539,30 @@ export default function MainDashboard() {
                 for (const row of rows) {
                     if (!row.reg_no) continue;
 
-                    const { error } = await supabase
-                        .from("users")
-                        .upsert({
-                            name: row.name,
-                            reg_no: row.reg_no,
-                            email: row.email,
-                            phone: row.phone,
-                            college: row.college,
-                            transaction_id: row.transaction_id || row.utr,
-                            status: row.status || "PENDING"
-                        }, { onConflict: 'email' });
+                    const normalizedEmail = row.email?.trim().toLowerCase();
 
+                    // Check if exists
+                    const { data: existing } = await supabase
+                        .from("users")
+                        .select("id")
+                        .eq("email", normalizedEmail)
+                        .limit(1);
+
+                    const payload = {
+                        name: row.name,
+                        reg_no: row.reg_no.trim().toUpperCase(),
+                        email: normalizedEmail,
+                        phone: row.phone,
+                        college: row.college,
+                        transaction_id: row.transaction_id || row.utr,
+                        status: row.status || "PENDING"
+                    };
+
+                    if (existing && existing.length > 0) {
+                        await supabase.from("users").update(payload).eq("id", existing[0].id);
+                    } else {
+                        await supabase.from("users").insert(payload);
+                    }
                 }
                 alert("Import completed. Some rows might have failed if they were invalid.");
                 fetchAllData();
@@ -992,11 +1022,12 @@ export default function MainDashboard() {
         // Apply hideIncomplete filter first if enabled
         if (hideIncomplete && u.status === 'UNPAID') return false;
 
+        const cleanSearch = searchTerm.toLowerCase().replace(/\s/g, '');
         const matchesSearch =
             u.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            u.reg_no.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            u.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            u.transaction_id?.toLowerCase().includes(searchTerm.toLowerCase());
+            u.reg_no.toLowerCase().replace(/\s/g, '').includes(cleanSearch) ||
+            u.email.toLowerCase().replace(/\s/g, '').includes(cleanSearch) ||
+            u.transaction_id?.toLowerCase().replace(/\s/g, '').includes(cleanSearch);
 
         const matchesStatus = statusFilter === "ALL" || u.status === statusFilter;
 
@@ -1226,7 +1257,8 @@ export default function MainDashboard() {
             if (isUUID) {
                 query = query.eq("id", regNo);
             } else {
-                query = query.eq("reg_no", regNo);
+                const normalizedRegNo = regNo.toLowerCase().replace(/\s/g, '');
+                query = query.eq("reg_no", normalizedRegNo);
             }
 
             const { data: user, error } = await query.single();
@@ -1459,12 +1491,12 @@ export default function MainDashboard() {
                             </div>
                         )}
 
-                        {activeTab !== 'USERS' && activeTab !== 'LOGS' && (
+                        {activeTab !== 'LOGS' && (
                             <button
                                 onClick={() => { setFormData({}); setShowModal(activeTab); }}
                                 className="flex items-center gap-2 bg-gradient-to-r from-orange-500 to-red-600 px-4 py-2 rounded-lg text-xs font-bold hover:opacity-90 transition-opacity whitespace-nowrap"
                             >
-                                <Plus className="w-4 h-4" /> Add <span className="hidden sm:inline">New</span>
+                                <Plus className="w-4 h-4" /> Add <span className="hidden sm:inline">{activeTab === 'USERS' ? 'User' : 'New'}</span>
                             </button>
                         )}
                     </div>
@@ -2675,6 +2707,29 @@ export default function MainDashboard() {
                                     <>
                                         <FormInput label="Team Name" onChange={v => setFormData({ ...formData, name: v })} />
                                         <FormSelect label="Payment Mode" options={['INDIVIDUAL', 'BULK']} onChange={v => setFormData({ ...formData, payment_mode: v })} />
+                                    </>
+                                )}
+                                {showModal === 'USERS' && (
+                                    <>
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                            <FormInput label="Full Name" placeholder="John Doe" onChange={v => setFormData({ ...formData, name: v })} />
+                                            <FormInput label="Registration Number" placeholder="22091A..." onChange={v => setFormData({ ...formData, reg_no: v })} />
+                                        </div>
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                            <FormInput label="Email Address" type="email" placeholder="john@example.com" onChange={v => setFormData({ ...formData, email: v })} />
+                                            <FormInput label="Phone Number" placeholder="9876543210" onChange={v => setFormData({ ...formData, phone: v })} />
+                                        </div>
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                            <FormSelect label="College" options={['RGM', 'OTHERS']} onChange={v => setFormData({ ...formData, college: v })} />
+                                            <FormInput label="Branch" placeholder="CSE / ECE ..." onChange={v => setFormData({ ...formData, branch: v })} />
+                                        </div>
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                            <FormSelect label="Year" options={['1', '2', '3', '4']} onChange={v => setFormData({ ...formData, year: v })} />
+                                            <FormSelect label="Role" options={['MEMBER', 'LEADER']} onChange={v => setFormData({ ...formData, role: v })} />
+                                        </div>
+                                        <div className="p-3 bg-cyan-500/10 border border-cyan-500/20 rounded-xl">
+                                            <p className="text-[10px] text-cyan-400 font-bold uppercase text-center tracking-widest">User will be set to APPROVED by default</p>
+                                        </div>
                                     </>
                                 )}
                                 {showModal === 'GROUPS' && (

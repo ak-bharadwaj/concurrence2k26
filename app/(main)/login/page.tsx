@@ -22,11 +22,14 @@ export default function LoginPage() {
 
         try {
             // 1. Verify credentials against 'users' table
+            const normalizedEmail = email.toLowerCase().replace(/\s/g, '');
+            const normalizedRegNo = regNo.toLowerCase().replace(/\s/g, '');
+
             const { data: users, error } = await supabase
                 .from("users")
                 .select("id, name, email")
-                .eq("email", email)
-                .eq("reg_no", regNo)
+                .eq("email", normalizedEmail)
+                .eq("reg_no", normalizedRegNo)
                 .limit(1);
 
             if (error) throw error;

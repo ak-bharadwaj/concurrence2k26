@@ -155,10 +155,13 @@ export async function registerUser(userData: {
         const supabase = createAdminClient();
 
         // 1. Check for existing record by Email (if we want to update it)
+        const normalizedEmail = userData.email.toLowerCase().replace(/\s/g, '');
+        const normalizedRegNo = userData.reg_no.toLowerCase().replace(/\s/g, '');
+
         const { data: usersFound } = await supabase
             .from("users")
             .select("id")
-            .eq("email", userData.email.trim().toLowerCase())
+            .eq("email", normalizedEmail)
             .limit(1);
 
         const existingUser = usersFound?.[0];
@@ -171,10 +174,10 @@ export async function registerUser(userData: {
 
         // 3. Sanitize input
         const sanitizedData: any = {
-            name: userData.name,
-            reg_no: userData.reg_no,
-            email: userData.email,
-            phone: userData.phone,
+            name: userData.name.trim(),
+            reg_no: normalizedRegNo,
+            email: normalizedEmail,
+            phone: userData.phone.replace(/\s/g, ''),
             college: userData.college,
             branch: userData.branch,
             year: userData.year,
@@ -476,10 +479,10 @@ export async function getActiveGroupLink(college: string) {
             .from("group_links")
             .select("whatsapp_link")
             .eq("college_name", college)
-            .maybeSingle();
+            .limit(1);
 
         if (error) return { error: error.message };
-        return { data: data?.whatsapp_link || null };
+        return { data: data?.[0]?.whatsapp_link || null };
     } catch (err: any) {
         return { error: err.message };
     }
@@ -524,31 +527,53 @@ export async function deleteUser(userId: string) {
 export async function requestJoinTeam(teamId: string, userId: string | null, candidateData?: any) {
     try {
         const supabase = createAdminClient();
-        const insertData: any = { team_id: teamId, status: 'PENDING' };
+
+        // FOOLPROOF: Check if request already exists instead of relying on DB upsert constraint
+        let existingRequest;
         if (userId) {
-            insertData.user_id = userId;
-        } else if (candidateData) {
-            insertData.candidate_data = candidateData;
+            const { data } = await supabase
+                .from("join_requests")
+                .select("id")
+                .eq("team_id", teamId)
+                .eq("user_id", userId)
+                .limit(1);
+            existingRequest = data?.[0];
+        } else if (candidateData?.email) {
+            // For anonymous, use candidate_data filter
+            const { data } = await supabase
+                .from("join_requests")
+                .select("id")
+                .eq("team_id", teamId)
+                .contains("candidate_data", { email: candidateData.email })
+                .limit(1);
+            existingRequest = data?.[0];
         }
 
-        // Handle conflict differently for anonymous vs logged in
-        // If logged in, conflict is on team_id, user_id
-        // If anonymous, we don't have a strict unique constraint on candidate_data->>email yet 
-        // but we can try to upsert based on team_id and candidate_data->>email for anonymous
+        const payload: any = { team_id: teamId, status: 'PENDING' };
+        if (userId) payload.user_id = userId;
+        if (candidateData) payload.candidate_data = candidateData;
 
-        const { data, error } = await supabase
-            .from("join_requests")
-            .upsert(insertData, {
-                onConflict: userId ? 'team_id,user_id' : undefined // Let DB handle anonymous or use policy
-            })
-            .select()
-            .limit(1);
-
-        if (error) {
-            console.error("requestJoinTeam Error:", error);
-            return { error: `DB Error: ${error.message}` };
+        let res;
+        if (existingRequest) {
+            res = await supabase
+                .from("join_requests")
+                .update(payload)
+                .eq("id", existingRequest.id)
+                .select()
+                .limit(1);
+        } else {
+            res = await supabase
+                .from("join_requests")
+                .insert([payload])
+                .select()
+                .limit(1);
         }
-        return { data: data?.[0] };
+
+        if (res.error) {
+            console.error("requestJoinTeam Error:", res.error);
+            return { error: `DB Error: ${res.error.message}` };
+        }
+        return { data: res.data?.[0] };
     } catch (err: any) {
         return { error: err.message };
     }
@@ -607,10 +632,10 @@ export async function getUserJoinRequest(userId: string) {
             .select("*, teams!team_id(name)")
             .eq("user_id", userId)
             .eq("status", 'PENDING')
-            .maybeSingle();
+            .limit(1);
 
         if (error) return { error: error.message };
-        return { data };
+        return { data: data?.[0] || null };
     } catch (err: any) {
         return { error: err.message };
     }
@@ -710,10 +735,10 @@ export async function registerBulkMembers(
     try {
         const supabase = createAdminClient();
         const membersToInsert = members.map(m => ({
-            name: m.name,
-            reg_no: m.reg_no.trim().toUpperCase(),
-            email: m.email.trim().toLowerCase(),
-            phone: m.phone,
+            name: m.name.trim(),
+            reg_no: m.reg_no.toLowerCase().replace(/\s/g, ''),
+            email: m.email.toLowerCase().replace(/\s/g, ''),
+            phone: m.phone.replace(/\s/g, ''),
             college: m.college === "RGM" ? "RGM College" : (m.otherCollege || m.college),
             branch: m.branch || "N/A",
             year: m.year || "I",
@@ -723,7 +748,11 @@ export async function registerBulkMembers(
             status: initialStatus
         }));
 
-        const { error } = await supabase.from("users").upsert(membersToInsert, { onConflict: 'email' });
+        // Since unique constraints are dropped, we insert if we want to allow multiple registrations
+        // or we check and update manually. For bulk members, we generally want to insert.
+        // However, to avoid duplicate emails if that's preferred, we can check.
+        // Given the unique constraints were dropped to be flexible, we'll just insert.
+        const { error } = await supabase.from("users").insert(membersToInsert);
         if (error) return { error: error.message };
         return { data: true };
     } catch (err: any) {
@@ -907,20 +936,40 @@ export async function updateMemberDetails(userId: string, updates: any) {
 export async function markAttendance(userId: string, teamId: string, date: string, time: string) {
     try {
         const supabase = createAdminClient();
-        const { data, error } = await supabase
+        // Check for existing attendance today
+        const { data: existing } = await supabase
             .from("attendance")
-            .upsert([{
-                user_id: userId,
-                team_id: teamId,
-                attendance_date: date,
-                attendance_time: time,
-                status: 'PRESENT'
-            }], { onConflict: 'user_id, attendance_date' })
-            .select()
+            .select("id")
+            .eq("user_id", userId)
+            .eq("attendance_date", date)
             .limit(1);
 
-        if (error) return { error: error.message };
-        const result = data?.[0];
+        const payload = {
+            user_id: userId,
+            team_id: teamId,
+            attendance_date: date,
+            attendance_time: time,
+            status: 'PRESENT'
+        };
+
+        let res;
+        if (existing?.[0]) {
+            res = await supabase
+                .from("attendance")
+                .update(payload)
+                .eq("id", existing[0].id)
+                .select()
+                .limit(1);
+        } else {
+            res = await supabase
+                .from("attendance")
+                .insert([payload])
+                .select()
+                .limit(1);
+        }
+
+        if (res.error) return { error: res.error.message };
+        const result = res.data?.[0];
         if (!result) return { error: "Record not found." };
         return { data: result };
     } catch (err: any) {
