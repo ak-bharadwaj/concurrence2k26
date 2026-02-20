@@ -344,6 +344,7 @@ export default function MainDashboard() {
                     branch: formData.branch,
                     year: formData.year,
                     role: formData.role || 'MEMBER',
+                    transaction_id: formData.transaction_id,
                     status: 'APPROVED'
                 });
                 if (res.error) throw new Error(res.error);
@@ -1024,9 +1025,10 @@ export default function MainDashboard() {
 
         const cleanSearch = searchTerm.toLowerCase().replace(/\s/g, '');
         const matchesSearch =
-            u.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            u.reg_no.toLowerCase().replace(/\s/g, '').includes(cleanSearch) ||
-            u.email.toLowerCase().replace(/\s/g, '').includes(cleanSearch) ||
+            u.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            u.reg_no?.toLowerCase().replace(/\s/g, '').includes(cleanSearch) ||
+            u.email?.toLowerCase().replace(/\s/g, '').includes(cleanSearch) ||
+            u.phone?.replace(/\s/g, '').includes(cleanSearch) ||
             u.transaction_id?.toLowerCase().replace(/\s/g, '').includes(cleanSearch);
 
         const matchesStatus = statusFilter === "ALL" || u.status === statusFilter;
@@ -1340,9 +1342,29 @@ export default function MainDashboard() {
         }
     };
 
-    const filteredTeams = hideIncomplete
-        ? data.teams.filter((t: any) => t.isVirtual ? t.members[0]?.status !== 'UNPAID' : t.members.some((m: any) => m.status !== 'UNPAID'))
-        : data.teams;
+    const filteredTeams = data.teams.filter((t: any) => {
+        if (hideIncomplete) {
+            const hasPaid = t.isVirtual ? t.members[0]?.status !== 'UNPAID' : t.members.some((m: any) => m.status !== 'UNPAID');
+            if (!hasPaid) return false;
+        }
+
+        if (!searchTerm) return true;
+        const cleanSearch = searchTerm.toLowerCase().replace(/\s/g, '');
+
+        const matchesTeam =
+            t.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            t.team_number?.toString().includes(cleanSearch) ||
+            t.unique_code?.toLowerCase().includes(cleanSearch);
+
+        const matchesMember = t.members.some((m: any) =>
+            m.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            m.reg_no?.toLowerCase().replace(/\s/g, '').includes(cleanSearch) ||
+            m.email?.toLowerCase().replace(/\s/g, '').includes(cleanSearch) ||
+            m.phone?.replace(/\s/g, '').includes(cleanSearch)
+        );
+
+        return matchesTeam || matchesMember;
+    });
 
 
 
@@ -1417,12 +1439,12 @@ export default function MainDashboard() {
                             </div>
                         </div>
 
-                        {activeTab === 'USERS' && (
+                        {(activeTab === 'USERS' || activeTab === 'TEAMS') && (
                             <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
-                                <div className="relative w-full sm:w-auto">
+                                <div className="relative w-full sm:w-auto text-white">
                                     <input
                                         type="text"
-                                        placeholder="Search..."
+                                        placeholder={`Search ${activeTab === 'USERS' ? 'Participants' : 'Squads'}...`}
                                         value={searchTerm}
                                         onChange={(e) => setSearchTerm(e.target.value)}
                                         className="bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-xs w-full sm:w-64 outline-none focus:border-orange-500/50 transition-all font-mono"
@@ -1431,28 +1453,30 @@ export default function MainDashboard() {
                                         <button onClick={() => setSearchTerm("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-white/50 hover:text-white font-bold text-lg">×</button>
                                     )}
                                 </div>
-                                <div className="flex gap-2 w-full sm:w-auto">
-                                    <select
-                                        value={statusFilter}
-                                        onChange={(e) => setStatusFilter(e.target.value)}
-                                        className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs outline-none focus:border-orange-500/50 appearance-none text-white/60 flex-1 sm:flex-none"
-                                    >
-                                        <option value="ALL">All Status</option>
-                                        <option value="PENDING">Pending</option>
-                                        <option value="VERIFYING">Verifying</option>
-                                        <option value="APPROVED">Approved</option>
-                                        <option value="REJECTED">Rejected</option>
-                                    </select>
-                                    <select
-                                        value={memberTypeFilter}
-                                        onChange={(e) => setMemberTypeFilter(e.target.value as any)}
-                                        className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs outline-none focus:border-orange-500/50 appearance-none text-white/60 flex-1 sm:flex-none"
-                                    >
-                                        <option value="ALL">All Members</option>
-                                        <option value="SQUAD">Squad Only</option>
-                                        <option value="SOLO">Solo Only</option>
-                                    </select>
-                                </div>
+                                {activeTab === 'USERS' && (
+                                    <div className="flex gap-2 w-full sm:w-auto">
+                                        <select
+                                            value={statusFilter}
+                                            onChange={(e) => setStatusFilter(e.target.value)}
+                                            className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs outline-none focus:border-orange-500/50 appearance-none text-white/60 flex-1 sm:flex-none"
+                                        >
+                                            <option value="ALL">All Status</option>
+                                            <option value="PENDING">Pending</option>
+                                            <option value="VERIFYING">Verifying</option>
+                                            <option value="APPROVED">Approved</option>
+                                            <option value="REJECTED">Rejected</option>
+                                        </select>
+                                        <select
+                                            value={memberTypeFilter}
+                                            onChange={(e) => setMemberTypeFilter(e.target.value as any)}
+                                            className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs outline-none focus:border-orange-500/50 appearance-none text-white/60 flex-1 sm:flex-none"
+                                        >
+                                            <option value="ALL">All Members</option>
+                                            <option value="SQUAD">Squad Only</option>
+                                            <option value="SOLO">Solo Only</option>
+                                        </select>
+                                    </div>
+                                )}
                             </div>
                         )}
                     </div>
@@ -2726,6 +2750,9 @@ export default function MainDashboard() {
                                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                             <FormSelect label="Year" options={['1', '2', '3', '4']} onChange={v => setFormData({ ...formData, year: v })} />
                                             <FormSelect label="Role" options={['MEMBER', 'LEADER']} onChange={v => setFormData({ ...formData, role: v })} />
+                                        </div>
+                                        <div className="grid grid-cols-1 gap-4">
+                                            <FormInput label="Paid To / Transaction ID" placeholder="e.g. Paid to Aman / UTR123..." onChange={v => setFormData({ ...formData, transaction_id: v })} />
                                         </div>
                                         <div className="p-3 bg-cyan-500/10 border border-cyan-500/20 rounded-xl">
                                             <p className="text-[10px] text-cyan-400 font-bold uppercase text-center tracking-widest">User will be set to APPROVED by default</p>
