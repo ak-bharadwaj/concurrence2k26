@@ -425,37 +425,39 @@ export async function approveTeamPayment(
     paymentDetails: { transaction_id: string | null; screenshot_url: string | null },
     whatsappLink?: string
 ) {
+    console.log(`[APPROVE] Starting approval for team: ${teamId} by admin: ${adminId}`);
     try {
         const cookieStore = await cookies();
         const adminSessionId = cookieStore.get('admin_session')?.value;
-        if (!adminSessionId) return { error: "Unauthorized" };
+        if (!adminSessionId) {
+            console.error("[APPROVE] No admin session cookie found!");
+            return { error: "Unauthorized: No admin session" };
+        }
 
         const supabase = createAdminClient();
 
-        const { data: teamFound, error: teamErr } = await supabase
-            .from("teams")
-            .select("*")
-            .eq("id", teamId)
-            .limit(1);
-
-        if (teamErr) return { error: teamErr.message };
-        const team = teamFound?.[0];
-
+        console.log(`[APPROVE] Updating members to APPROVED for team_id: ${teamId}`);
         const { error: membersErr } = await supabase
             .from("users")
             .update({ status: "APPROVED", verified_by: adminSessionId })
             .eq("team_id", teamId);
 
-        if (membersErr) return { error: membersErr.message };
+        if (membersErr) {
+            console.error("[APPROVE] Database Update Error:", membersErr);
+            return { error: `DB Error: ${membersErr.message}` };
+        }
 
-        // Send approval emails to all team members
-        const { data: members } = await supabase
+        console.log(`[APPROVE] Fetching approved members for email notifications`);
+        const { data: members, error: fetchErr } = await supabase
             .from("users")
             .select("*")
             .eq("team_id", teamId)
             .eq("status", "APPROVED");
 
+        if (fetchErr) console.error("[APPROVE] Fetch Members Error:", fetchErr);
+
         if (members) {
+            console.log(`[APPROVE] Sending approval emails to ${members.length} members`);
             const qrUrl = (uid: string) => `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${uid}`;
             members.forEach(m => {
                 sendEmail(
@@ -466,8 +468,10 @@ export async function approveTeamPayment(
             });
         }
 
-        return { data: team };
+        console.log(`[APPROVE] Success for team: ${teamId}`);
+        return { data: { success: true } };
     } catch (err: any) {
+        console.error("[APPROVE] Unexpected Exception:", err);
         return { error: err.message };
     }
 }

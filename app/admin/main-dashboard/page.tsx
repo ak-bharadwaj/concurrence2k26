@@ -734,10 +734,18 @@ export default function MainDashboard() {
             const link = linkRes?.data || "https://chat.whatsapp.com/Dto50B4dSfyIiQuqG6BKCs?mode=gi_t";
 
             if (verificationGroup.type === 'SQUAD') {
-                await approveTeamPayment(verificationGroup.id, admin.id, paymentDetails, link);
+                const res = await approveTeamPayment(verificationGroup.id, admin.id, paymentDetails, link);
+                if (res?.error) {
+                    alert("Approve Failed: " + res.error);
+                    return;
+                }
             } else {
                 // Solo - just reuse standard approve
-                await updateStatus(verificationGroup.members[0].id, admin.id, "APPROVED", "APPROVE_PAYMENT", link);
+                const res = await updateStatus(verificationGroup.members[0].id, admin.id, "APPROVED", "APPROVE_PAYMENT", link);
+                if (res?.error) {
+                    alert("Approve Failed: " + res.error);
+                    return;
+                }
             }
 
             setVerificationGroup(null);
