@@ -10,11 +10,13 @@ export async function adminLogin(username: string, password_hash: string) {
         .limit(1);
 
     if (error) {
-        throw new Error("Invalid username or password");
+        console.error("Supabase Login Error:", error);
+        throw new Error(`Login Error: ${error.message}`);
     }
 
     const admin = adminData?.[0];
     if (!admin) {
+        console.warn("No admin found with those credentials");
         throw new Error("Invalid username or password");
     }
 
