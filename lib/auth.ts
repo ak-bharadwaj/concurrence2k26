@@ -1,22 +1,32 @@
 import { supabase } from "./supabase";
 
 export async function adminLogin(username: string, password_hash: string) {
+    console.log("Attempting Login for:", username);
+    console.log("Supabase URL:", process.env.NEXT_PUBLIC_SUPABASE_URL);
+
     const { data: adminData, error } = await supabase
         .from("admins")
         .select("*")
         .eq("username", username)
-        .eq("password_hash", password_hash) // In production, use bcrypt.compare
-        .eq("active", true)
         .limit(1);
 
     if (error) {
-        console.error("Supabase Login Error:", error);
+        console.error("Supabase Query Error:", error);
         throw new Error(`Login Error: ${error.message}`);
     }
 
-    const admin = adminData?.[0];
+    console.log("Found admins for username:", adminData?.length);
+
+    const admin = adminData?.find(a => a.password_hash === password_hash && a.active === true);
+
     if (!admin) {
-        console.warn("No admin found with those credentials");
+        if (adminData && adminData.length > 0) {
+            console.warn("Admin found but password or active status mismatch.");
+            console.log("Params:", { password_hash, active: true });
+            console.log("Record:", adminData[0]);
+        } else {
+            console.warn("No admin found with username:", username);
+        }
         throw new Error("Invalid username or password");
     }
 
