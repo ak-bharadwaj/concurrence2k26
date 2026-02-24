@@ -27,7 +27,9 @@ export default function AdminLoginPage() {
                 router.push("/admin/sub-dashboard");
             }
         } catch (err: any) {
-            setError(getFriendlyError(err));
+            const msg = err.message || "Unknown error";
+            setError(msg);
+            console.error("Full Login Error:", err);
         } finally {
             setLoading(false);
         }
