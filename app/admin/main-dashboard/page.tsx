@@ -118,39 +118,53 @@ export default function MainDashboard() {
         setAdmin(session);
         fetchAllData();
 
-        // Real-time Subscription - Optimized for Consistency
+        // Smart real-time: update state locally per event instead of full re-fetch
         const channel = supabase
             .channel('dashboard-changes')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, () => {
-                debouncedFetch(true);
+            // Users: update/insert/delete state locally
+            .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'users' }, (payload: any) => {
+                setData((prev: any) => ({
+                    ...prev,
+                    users: prev.users.map((u: any) => u.id === payload.new.id ? { ...u, ...payload.new } : u)
+                }));
             })
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, () => {
-                debouncedFetch(true);
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'users' }, () => {
+                debouncedFetch(true); // New user needs team join resolved
             })
+            .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'users' }, (payload: any) => {
+                setData((prev: any) => ({
+                    ...prev,
+                    users: prev.users.filter((u: any) => u.id !== payload.old.id)
+                }));
+            })
+            // Teams: full re-fetch needed (member counts change)
             .on('postgres_changes', { event: '*', schema: 'public', table: 'teams' }, () => {
                 debouncedFetch(true);
             })
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'join_requests' }, () => {
-                debouncedFetch(true);
-            })
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'qr_codes' }, (payload: any) => {
-                if (payload.eventType === 'UPDATE') {
+            // Join requests: targeted update
+            .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'join_requests' }, (payload: any) => {
+                if (payload.new.status !== 'PENDING') {
                     setData((prev: any) => ({
                         ...prev,
-                        qr: prev.qr.map((q: any) => q.id === payload.new.id ? { ...q, ...payload.new } : q)
+                        joinRequests: (prev.joinRequests || []).filter((r: any) => r.id !== payload.new.id)
                     }));
-                } else {
-                    debouncedFetch(true);
                 }
             })
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'admins' }, () => {
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'join_requests' }, () => {
                 debouncedFetch(true);
             })
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'email_accounts' }, () => {
-                debouncedFetch(true);
+            // QR codes: update state locally on update
+            .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'qr_codes' }, (payload: any) => {
+                setData((prev: any) => ({
+                    ...prev,
+                    qr: prev.qr.map((q: any) => q.id === payload.new.id ? { ...q, ...payload.new } : q)
+                }));
             })
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'group_links' }, () => {
-                debouncedFetch(true);
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'qr_codes' }, (payload: any) => {
+                setData((prev: any) => ({ ...prev, qr: [payload.new, ...prev.qr] }));
+            })
+            .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'qr_codes' }, (payload: any) => {
+                setData((prev: any) => ({ ...prev, qr: prev.qr.filter((q: any) => q.id !== payload.old.id) }));
             })
             .subscribe();
 
@@ -380,29 +394,22 @@ export default function MainDashboard() {
     const fetchAllData = async (silent = false) => {
         try {
             if (!silent) setLoading(true);
+            // Only fetch critical data upfront: users, teams, join_requests
             const results = await Promise.all([
-                supabase.from("users").select("*, team_id, squad:teams!team_id(name, unique_code, team_number)").order("created_at", { ascending: false }),
-                supabase.from("admins").select("id, username, role, active, created_at").order("created_at", { ascending: false }),
-                supabase.from("qr_codes").select("*").order("created_at", { ascending: false }),
-                supabase.from("email_accounts").select("id, email_address, smtp_host, smtp_port, active, created_at").order("created_at", { ascending: false }),
-                supabase.from("group_links").select("*").order("created_at", { ascending: false }),
-                supabase.from("action_logs").select("*, users!user_id(name), admins(username)").order("timestamp", { ascending: false }).limit(50),
-                supabase.from("teams").select("*"),
-                supabase.from("join_requests").select("*, teams!team_id(name, unique_code)").eq("status", "PENDING")
+                supabase.from("users")
+                    .select("id, name, reg_no, email, phone, college, branch, year, status, transaction_id, screenshot_url, team_id, attendance, tshirt_size, created_at, squad:teams!team_id(name, unique_code)")
+                    .order("created_at", { ascending: false }),
+                supabase.from("teams").select("id, name, unique_code, payment_mode, max_members, status, leader_id, created_at"),
+                supabase.from("join_requests").select("id, user_id, team_id, status, candidate_data, created_at, teams!team_id(name, unique_code)").eq("status", "PENDING")
             ]);
 
-            // Robust individual error checks
             const errors = results.filter(r => r.error).map(r => r.error?.message);
             if (errors.length > 0) {
-                // We show alert but still try to render what we got
                 console.error("Sync errors:", errors);
                 alert("Some data failed to sync: \n" + errors.join("\n"));
             }
 
-            const [users, admins, qr, emails, groups, logs, teams, joinRequests] = results.map(r => r.data);
-
-            // STRICT FILTERING: Data used for summary counts and main list must ignore UNPAID/JOIN_PENDING
-            const activeUsers = (users || []).filter((u: any) => !['UNPAID', 'JOIN_PENDING'].includes(u.status));
+            const [users, teams, joinRequests] = results.map(r => r.data);
 
             const processedUsers = (users || []).map((u: any) => {
                 const request = (joinRequests || []).find((r: any) => r.user_id === u.id);
@@ -428,7 +435,6 @@ export default function MainDashboard() {
 
             const unifiedTeams = [
                 ...(teams || []).map((t: any) => {
-                    // Use loose equality to handle potential string/UUID mismatches
                     const teamMembers = (users || []).filter((u: any) => u.team_id == t.id);
                     return {
                         ...t,
@@ -438,7 +444,6 @@ export default function MainDashboard() {
                         proofs: teamMembers.filter((m: any) => m.screenshot_url || m.transaction_id),
                     };
                 }),
-                // Filter out users who have a team_id (truthy)
                 ...(users || []).filter((u: any) => !u.team_id && !['UNPAID', 'JOIN_PENDING'].includes(u.status)).map((u: any) => ({
                     id: `SOLO-${u.id}`,
                     name: `${u.name}`,
@@ -452,20 +457,50 @@ export default function MainDashboard() {
                 }))
             ].sort((a: any, b: any) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
 
-            setData({
+            setData((prev: any) => ({
+                ...prev,
                 users: processedUsers,
-                admins: admins || [],
-                qr: qr || [],
-                emails: emails || [],
-                groups: groups || [],
-                logs: logs || [],
-                teams: unifiedTeams
-            });
+                teams: unifiedTeams,
+                // Keep lazily-loaded tab data if already present
+                admins: prev.admins,
+                qr: prev.qr,
+                emails: prev.emails,
+                groups: prev.groups,
+                logs: prev.logs,
+            }));
             setLastSynced(new Date());
         } catch (err: any) {
             alert("Critical Error loading data: " + err.message);
         } finally {
             setLoading(false);
+        }
+    };
+
+    // Lazy-load non-critical tab data only when that tab is opened
+    const fetchTabData = async (tab: Tab) => {
+        try {
+            if (tab === "ADMINS" && data.admins.length === 0) {
+                const { data: admins } = await supabase.from("admins").select("id, username, role, active, created_at").order("created_at", { ascending: false });
+                setData((prev: any) => ({ ...prev, admins: admins || [] }));
+            }
+            if (tab === "QR" && data.qr.length === 0) {
+                const { data: qr } = await supabase.from("qr_codes").select("*").order("created_at", { ascending: false });
+                setData((prev: any) => ({ ...prev, qr: qr || [] }));
+            }
+            if (tab === "EMAILS" && data.emails.length === 0) {
+                const { data: emails } = await supabase.from("email_accounts").select("id, email_address, smtp_host, smtp_port, active, created_at").order("created_at", { ascending: false });
+                setData((prev: any) => ({ ...prev, emails: emails || [] }));
+            }
+            if (tab === "GROUPS" && data.groups.length === 0) {
+                const { data: groups } = await supabase.from("group_links").select("*").order("created_at", { ascending: false });
+                setData((prev: any) => ({ ...prev, groups: groups || [] }));
+            }
+            if (tab === "LOGS" && data.logs.length === 0) {
+                const { data: logs } = await supabase.from("action_logs").select("*, admins(username)").order("created_at", { ascending: false }).limit(50);
+                setData((prev: any) => ({ ...prev, logs: logs || [] }));
+            }
+        } catch (err: any) {
+            console.error("Tab data fetch error:", err.message);
         }
     };
 
@@ -1400,12 +1435,12 @@ export default function MainDashboard() {
                         <NavItem icon={QrCode} label="Take Attendance" active={activeTab === "SCAN"} onClick={() => { setActiveTab("SCAN"); setMobileMenuOpen(false); }} />
                         <NavItem icon={Menu} label="All Teams" active={activeTab === "TEAMS"} onClick={() => { setActiveTab("TEAMS"); setMobileMenuOpen(false); }} />
                     </div>
-                    <NavItem icon={ShieldCheck} label="Sub Admins" active={activeTab === 'ADMINS'} onClick={() => { setActiveTab('ADMINS'); setMobileMenuOpen(false); }} />
-                    <NavItem icon={QrCode} label="QR Codes" active={activeTab === 'QR'} onClick={() => { setActiveTab('QR'); setMobileMenuOpen(false); }} />
-                    <NavItem icon={Mail} label="Email Accounts" active={activeTab === 'EMAILS'} onClick={() => { setActiveTab('EMAILS'); setMobileMenuOpen(false); }} />
-                    <NavItem icon={LinkIcon} label="WhatsApp Links" active={activeTab === 'GROUPS'} onClick={() => { setActiveTab('GROUPS'); setMobileMenuOpen(false); }} />
+                    <NavItem icon={ShieldCheck} label="Sub Admins" active={activeTab === 'ADMINS'} onClick={() => { setActiveTab('ADMINS'); setMobileMenuOpen(false); fetchTabData('ADMINS'); }} />
+                    <NavItem icon={QrCode} label="QR Codes" active={activeTab === 'QR'} onClick={() => { setActiveTab('QR'); setMobileMenuOpen(false); fetchTabData('QR'); }} />
+                    <NavItem icon={Mail} label="Email Accounts" active={activeTab === 'EMAILS'} onClick={() => { setActiveTab('EMAILS'); setMobileMenuOpen(false); fetchTabData('EMAILS'); }} />
+                    <NavItem icon={LinkIcon} label="WhatsApp Links" active={activeTab === 'GROUPS'} onClick={() => { setActiveTab('GROUPS'); setMobileMenuOpen(false); fetchTabData('GROUPS'); }} />
                     <NavItem icon={MessageCircle} label="Support Tickets" active={false} onClick={() => window.location.href = "/admin/support"} />
-                    <NavItem icon={Activity} label="Action Logs" active={activeTab === 'LOGS'} onClick={() => { setActiveTab('LOGS'); setMobileMenuOpen(false); }} />
+                    <NavItem icon={Activity} label="Action Logs" active={activeTab === 'LOGS'} onClick={() => { setActiveTab('LOGS'); setMobileMenuOpen(false); fetchTabData('LOGS'); }} />
                 </nav>
 
                 <div className="p-4 border-t border-white/10">

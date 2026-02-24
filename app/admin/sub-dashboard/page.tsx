@@ -37,21 +37,37 @@ export default function SubDashboard() {
         setAdmin(session);
         fetchUsers();
 
-        // Real-time Subscription (removed redundant polling for performance)
+        // Smart real-time: update state locally instead of re-fetching all data
         const channel = supabase
             .channel("users_changes")
             .on(
                 "postgres_changes",
-                { event: "*", schema: "public", table: "users" },
-                () => {
-                    fetchUsers(true);
+                { event: "UPDATE", schema: "public", table: "users" },
+                (payload: any) => {
+                    const updated = payload.new;
+                    // If user is no longer pending/verifying, remove from list
+                    if (!["PENDING", "VERIFYING"].includes(updated.status)) {
+                        setUsers(prev => prev.filter(u => u.id !== updated.id));
+                    } else {
+                        setUsers(prev => prev.map(u => u.id === updated.id ? { ...u, ...updated } : u));
+                    }
                 }
             )
             .on(
                 "postgres_changes",
-                { event: "*", schema: "public", table: "teams" },
-                () => {
-                    fetchUsers(true);
+                { event: "INSERT", schema: "public", table: "users" },
+                (payload: any) => {
+                    const newUser = payload.new;
+                    if (["PENDING", "VERIFYING"].includes(newUser.status)) {
+                        fetchUsers(true); // New user — need team join data too
+                    }
+                }
+            )
+            .on(
+                "postgres_changes",
+                { event: "DELETE", schema: "public", table: "users" },
+                (payload: any) => {
+                    setUsers(prev => prev.filter(u => u.id !== payload.old.id));
                 }
             )
             .subscribe();
@@ -66,13 +82,15 @@ export default function SubDashboard() {
             if (!silent) setLoading(true);
             const { data, error } = await supabase
                 .from("users")
-                .select("*, squad:teams!team_id(name)")
-                .order("created_at", { ascending: false });
+                .select("id, name, reg_no, email, phone, college, branch, year, status, screenshot_url, transaction_id, verified_by, team_id, created_at, squad:teams!team_id(name)")
+                .in("status", ["PENDING", "VERIFYING"])
+                .order("created_at", { ascending: false })
+                .limit(200);
             if (error) throw error;
 
-            // Sort: PENDING first, then by joined_at desc
+            // Sort: VERIFYING first (being reviewed), then PENDING
             const sortedData = (data || []).sort((a: any, b: any) => {
-                const statusOrder: Record<string, number> = { 'PENDING': 0, 'VERIFYING': 1, 'APPROVED': 2, 'REJECTED': 3 };
+                const statusOrder: Record<string, number> = { 'VERIFYING': 0, 'PENDING': 1 };
                 const orderA = statusOrder[a.status] ?? 99;
                 const orderB = statusOrder[b.status] ?? 99;
 
