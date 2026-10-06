@@ -7,3 +7,4 @@
 - [2026-10-05 17:24] docs: document schema migration steps
 - [2026-10-06 16:45] feat: add structured logging
 - [2026-10-06 20:20] fix: resolve edge case in validation layer
+- [2026-10-06 08:05] docs: clarify configuration parameters
