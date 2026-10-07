@@ -10,3 +10,4 @@
 - [2026-10-06 08:05] docs: clarify configuration parameters
 - [2026-10-06 09:22] refactor: simplify state transition logic
 - [2026-10-07 08:45] chore: remove unused feature flags
+- [2026-10-07 08:38] test: add regression test for #142
