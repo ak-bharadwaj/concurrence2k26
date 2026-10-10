@@ -17,3 +17,4 @@
 - [2026-10-08 10:19] docs: document retry mechanism
 - [2026-10-08 20:42] chore: remove unused feature flags
 - [2026-10-09 10:54] test: add regression test for #142
+- [2026-10-10 16:56] chore: configure pre-commit hooks
