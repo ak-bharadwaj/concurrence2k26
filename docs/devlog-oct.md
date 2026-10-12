@@ -21,3 +21,4 @@
 - [2026-10-10 12:42] refactor: optimize hot path in data pipeline
 - [2026-10-10 16:33] fix: correct off-by-one in pagination
 - [2026-10-11 09:29] chore: update dependency constraints
+- [2026-10-12 15:34] docs: add architecture decision record
