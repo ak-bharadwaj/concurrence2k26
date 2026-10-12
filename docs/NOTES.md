@@ -11,3 +11,6 @@ Development notes and progress tracking.
 
 ### 2026-10-10
 - docs: added troubleshooting notes from debug session
+
+### 2026-10-12
+- refactor: extracted shared utility functions
