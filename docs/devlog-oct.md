@@ -24,3 +24,4 @@
 - [2026-10-12 15:34] docs: add architecture decision record
 - [2026-10-12 14:33] refactor: normalize response envelope
 - [2026-10-14 10:45] chore: configure pre-commit hooks
+- [2026-10-14 18:35] refactor: optimize hot path in data pipeline
