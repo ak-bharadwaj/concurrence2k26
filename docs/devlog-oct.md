@@ -23,3 +23,4 @@
 - [2026-10-11 09:29] chore: update dependency constraints
 - [2026-10-12 15:34] docs: add architecture decision record
 - [2026-10-12 14:33] refactor: normalize response envelope
+- [2026-10-14 10:45] chore: configure pre-commit hooks
