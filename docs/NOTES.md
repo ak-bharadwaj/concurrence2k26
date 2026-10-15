@@ -14,3 +14,6 @@ Development notes and progress tracking.
 
 ### 2026-10-12
 - refactor: extracted shared utility functions
+
+### 2026-10-15
+- docs: updated contribution guidelines
