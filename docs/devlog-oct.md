@@ -31,3 +31,4 @@
 - [2026-10-15 13:06] refactor: improve query performance
 - [2026-10-16 15:29] chore: configure pre-commit hooks
 - [2026-10-16 10:35] refactor: optimize hot path in data pipeline
+- [2026-10-16 17:58] fix: correct off-by-one in pagination
