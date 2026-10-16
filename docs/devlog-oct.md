@@ -29,3 +29,4 @@
 - [2026-10-14 10:13] feat: implement graceful shutdown hook
 - [2026-10-15 13:17] chore: align code style with linter
 - [2026-10-15 13:06] refactor: improve query performance
+- [2026-10-16 15:29] chore: configure pre-commit hooks
