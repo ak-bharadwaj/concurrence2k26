@@ -17,3 +17,6 @@ Development notes and progress tracking.
 
 ### 2026-10-15
 - docs: updated contribution guidelines
+
+### 2026-10-17
+- chore: cleaned test fixtures and mock data
