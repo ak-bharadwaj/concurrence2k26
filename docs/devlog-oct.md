@@ -32,3 +32,4 @@
 - [2026-10-16 15:29] chore: configure pre-commit hooks
 - [2026-10-16 10:35] refactor: optimize hot path in data pipeline
 - [2026-10-16 17:58] fix: correct off-by-one in pagination
+- [2026-10-17 11:18] refactor: simplify state transition logic
