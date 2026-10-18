@@ -35,3 +35,4 @@
 - [2026-10-17 11:18] refactor: simplify state transition logic
 - [2026-10-18 15:01] chore: align code style with linter
 - [2026-10-18 20:50] refactor: improve query performance
+- [2026-10-18 11:06] fix: resolve memory leak in worker
