@@ -20,3 +20,6 @@ Development notes and progress tracking.
 
 ### 2026-10-17
 - chore: cleaned test fixtures and mock data
+
+### 2026-10-19
+- docs: documented environment setup requirements
