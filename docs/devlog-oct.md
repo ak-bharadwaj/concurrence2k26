@@ -39,3 +39,4 @@
 - [2026-10-18 21:46] feat: add error boundary handling
 - [2026-10-18 09:18] fix: handle null pointer in serializer
 - [2026-10-18 18:56] docs: add architecture decision record
+- [2026-10-19 10:23] chore: align code style with linter
