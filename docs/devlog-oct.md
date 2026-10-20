@@ -43,3 +43,4 @@
 - [2026-10-20 17:22] chore: prune stale branches references
 - [2026-10-20 19:35] test: mock external API responses
 - [2026-10-20 17:33] chore: cleanup deprecated utility methods
+- [2026-10-20 11:52] refactor: extract reusable middleware
