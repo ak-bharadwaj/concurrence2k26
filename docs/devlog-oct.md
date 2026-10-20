@@ -41,3 +41,4 @@
 - [2026-10-18 18:56] docs: add architecture decision record
 - [2026-10-19 10:23] chore: align code style with linter
 - [2026-10-20 17:22] chore: prune stale branches references
+- [2026-10-20 19:35] test: mock external API responses
