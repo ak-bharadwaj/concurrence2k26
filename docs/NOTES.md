@@ -23,3 +23,6 @@ Development notes and progress tracking.
 
 ### 2026-10-19
 - docs: documented environment setup requirements
+
+### 2026-10-21
+- refactor: improved type safety in data layer
