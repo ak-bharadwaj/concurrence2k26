@@ -50,3 +50,4 @@
 - [2026-10-22 09:27] test: mock external API responses
 - [2026-10-22 20:14] chore: cleanup deprecated utility methods
 - [2026-10-22 10:53] refactor: extract reusable middleware
+- [2026-10-22 18:17] fix: sanitize user input in forms
