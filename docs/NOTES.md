@@ -26,3 +26,6 @@ Development notes and progress tracking.
 
 ### 2026-10-21
 - refactor: improved type safety in data layer
+
+### 2026-10-23
+- docs: added performance profiling notes
