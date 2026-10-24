@@ -53,3 +53,4 @@
 - [2026-10-22 18:17] fix: sanitize user input in forms
 - [2026-10-23 13:08] feat: add health check endpoint
 - [2026-10-24 18:23] chore: prune stale branches references
+- [2026-10-24 15:50] test: mock external API responses
