@@ -56,3 +56,4 @@
 - [2026-10-24 15:50] test: mock external API responses
 - [2026-10-24 09:28] chore: cleanup deprecated utility methods
 - [2026-10-25 10:22] fix: correct off-by-one in pagination
+- [2026-10-25 21:43] feat: implement graceful shutdown hook
