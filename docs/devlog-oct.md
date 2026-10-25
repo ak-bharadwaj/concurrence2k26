@@ -60,3 +60,4 @@
 - [2026-10-25 11:20] fix: prevent race condition in cache
 - [2026-10-25 10:04] docs: document schema migration steps
 - [2026-10-25 20:42] refactor: decouple service dependencies
+- [2026-10-25 16:57] docs: update technical specification
