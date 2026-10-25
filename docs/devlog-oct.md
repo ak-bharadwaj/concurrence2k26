@@ -57,3 +57,4 @@
 - [2026-10-24 09:28] chore: cleanup deprecated utility methods
 - [2026-10-25 10:22] fix: correct off-by-one in pagination
 - [2026-10-25 21:43] feat: implement graceful shutdown hook
+- [2026-10-25 11:20] fix: prevent race condition in cache
