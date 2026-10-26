@@ -63,3 +63,4 @@
 - [2026-10-25 16:57] docs: update technical specification
 - [2026-10-25 20:58] chore: normalize import ordering
 - [2026-10-26 12:11] docs: document retry mechanism
+- [2026-10-26 12:25] chore: remove unused feature flags
