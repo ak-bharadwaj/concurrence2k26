@@ -65,3 +65,4 @@
 - [2026-10-26 12:11] docs: document retry mechanism
 - [2026-10-26 12:25] chore: remove unused feature flags
 - [2026-10-27 10:15] docs: update deployment runbook
+- [2026-10-27 09:49] chore: prune stale branches references
