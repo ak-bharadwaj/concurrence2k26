@@ -64,3 +64,4 @@
 - [2026-10-25 20:58] chore: normalize import ordering
 - [2026-10-26 12:11] docs: document retry mechanism
 - [2026-10-26 12:25] chore: remove unused feature flags
+- [2026-10-27 10:15] docs: update deployment runbook
