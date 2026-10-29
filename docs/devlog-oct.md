@@ -67,3 +67,4 @@
 - [2026-10-27 10:15] docs: update deployment runbook
 - [2026-10-27 09:49] chore: prune stale branches references
 - [2026-10-29 13:54] fix: resolve memory leak in worker
+- [2026-10-29 08:03] feat: add error boundary handling
