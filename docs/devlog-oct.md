@@ -72,3 +72,4 @@
 - [2026-10-29 12:33] docs: add architecture decision record
 - [2026-10-30 18:37] docs: update deployment runbook
 - [2026-10-30 15:00] chore: prune stale branches references
+- [2026-10-30 15:21] test: mock external API responses
