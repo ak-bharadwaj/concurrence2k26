@@ -71,3 +71,4 @@
 - [2026-10-29 14:47] fix: handle null pointer in serializer
 - [2026-10-29 12:33] docs: add architecture decision record
 - [2026-10-30 18:37] docs: update deployment runbook
+- [2026-10-30 15:00] chore: prune stale branches references
